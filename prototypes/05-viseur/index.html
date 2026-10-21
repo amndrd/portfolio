@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 05 · Crosshair</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  body.hover canvas { cursor: pointer; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script>
+// Prototype 05 — crosshair: hover, entry, travel, lock, click (rotation + inversion), other cells vanish.
+// Every timing below is measured on the reference at 60 fps.
+// Mouse: hover / click a cell. Keys: arrows + Enter select, Esc back to grid, R replay boot,
+// S slow motion, I invert, H label.
+// URL params: ?inv=0|1&hud=0|1&seed=N&boot=0|1&freeze=1&auto=<cell>@<frame>
+
+const FPS = 60;
+
+// ---- boot (prototype 04) ------------------------------------------------------
+const BOOT_START = 27, BOOT_STEP = 4;
+const CELL_BOOT = [[0, 'brackets'], [2, 'off'], [5, 'brackets'], [28, 'off'], [32, 'framed'], [36, 'frame'], [37, 'fade'], [41, 'done']];
+const FADE = [[0.36, 0.55], [0.67, 0.3], [0.9, 0], [0.95, 0]];
+function cellState(rel) {
+  let state = 'hidden', from = 0;
+  for (const [f, s] of CELL_BOOT) if (rel >= f) { state = s; from = f; }
+  return { state, step: rel - from };
+}
+
+// ---- crosshair, frames after the selection starts -------------------------------
+const XH = {
+  fadeFrames: 14,        // lines + reticle fade in (overlaps the start of the travel)
+  moveStart: 9,
+  moveFrames: 31,
+  click: 60,             // rotation + inversion
+  vanishDelay: 2,        // other cells vanish one per frame, reading order, from click + 2
+  labelStart: 9,
+  labelRate: 0.8,        // characters per frame
+  start: [0.845, 0.313], // entry point (fraction of the screen)
+  // proportions as fractions of one cell
+  line: 0.068, knock: 0.05, bracket: 0.07, bracketArm: 0.35, bracketOffset: 0.15, label: 0.15,
+};
+// Click, frames after the click (measured on the de-rotated 4K frames).
+// Rotation of the cell + reticle, degrees clockwise: swings back past 0 and holds a slight counter-tilt.
+const ROT = [9.9, 9.8, 9.3, 9.2, 8.7, 8.2, 7.4, 6.7, 5.9, 5.1, 4.2, 3.3, 2.3, 1.6, 0.8, 0, 0,
+             -0.9, -1.5, -2.1, -2.6, -3.1, -3.4, -3.6, -3.7, -3.7, -3.7, -3.6, -3.4];
+const RETICLE_ZOOM = [1.094, 1.085, 1.064, 1.047, 1.021, 1.009];   // then 1
+const CLICK_FILL = [0.15, 0.48, 0.88];       // +0..+2 bright fill laid over the whole interior, pictogram included
+const CLICK_CELL = [1.02, 1.015, 1.0];       // +0..+2 cell scale
+const CLICK_ICON = [1.045, 1.045, 1.025];    // +0..+2 pictogram scale
+const CLICK_SQUARE = [0.975, 0.95, 0.875, 0.865];   // from +3: solid square shrinking inside the cell, holds 0.865
+const CLICK_DARK = [0, 0.25, 0.64, 0.98];    // from +3: dark pictogram opacity, then 1
+
+function bezier(x1, y1, x2, y2) {
+  return t => {
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 30; i++) {
+      const s = (lo + hi) / 2;
+      const x = 3 * (1 - s) ** 2 * s * x1 + 3 * (1 - s) * s * s * x2 + s ** 3;
+      if (x < t) lo = s; else hi = s;
+    }
+    const s = (lo + hi) / 2;
+    return 3 * (1 - s) ** 2 * s * y1 + 3 * (1 - s) * s * s * y2 + s ** 3;
+  };
+}
+const travel = bezier(0.40, 0.15, 0.40, 0.95);   // fitted on the measured positions
+
+const params = new URLSearchParams(location.search);
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const freeze = params.get('freeze') === '1';
+const auto = params.get('auto') ? params.get('auto').split('@').map(Number) : null;
+
+function shuffled(n, seed) {
+  let s = seed;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const a = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+let dpr, layout;
+
+let triggerAt, bootOffset = 0;   // boot timeline starts at frame bootOffset
+let selection = null;            // { cell, start, from: [x, y], to: [x, y] }
+let hover = null;
+let frameNow = 0;
+
+function resetBoot(f, play) {
+  const seed = Number(params.get('seed')) || 1 + Math.floor(Math.random() * 1e6);
+  const order = shuffled(GRID.length, seed);
+  triggerAt = new Array(GRID.length);
+  order.forEach((cell, k) => { triggerAt[cell] = BOOT_START + k * BOOT_STEP; });
+  bootOffset = play ? f : -1e6;
+  selection = null;
+}
+const bootDone = f => f - bootOffset >= BOOT_START + (GRID.length - 1) * BOOT_STEP + 41;
+
+function cellBox(k) { return [layout.cellX(k % 5), layout.cellY(Math.floor(k / 5))]; }
+
+function startSelection(cell, f) {
+  const { C } = layout, w = innerWidth, h = innerHeight;
+  const [x, y] = cellBox(cell);
+  const to = [x + C / 2, y + C / 2];
+  let from = [XH.start[0] * w, XH.start[1] * h];
+  // too close to the entry point: come in from the mirrored side instead
+  if (Math.hypot(from[0] - to[0], from[1] - to[1]) < w * 0.16) from = [(1 - XH.start[0]) * w, XH.start[1] * h];
+  selection = { cell, start: f, from, to };
+  hover = null; document.body.classList.remove('hover');
+}
+
+// ---- drawing ---------------------------------------------------------------------
+function rect(r, pad = 0) { ui.fillRect(r[0] - pad, r[1] - pad, r[2] + 2 * pad, r[3] + 2 * pad); }
+
+function drawCellAt(k, f) {
+  const { C, t } = layout, [x, y] = cellBox(k), name = GRID[k];
+  const { state, step } = cellState(f - bootOffset - triggerAt[k]);
+  switch (state) {
+    case 'brackets': drawBootBrackets(ui, x, y, C, t); break;
+    case 'framed': drawFrame(ui, x, y, C, t); drawBootBrackets(ui, x, y, C, t); break;
+    case 'frame': drawFrame(ui, x, y, C, t); break;
+    case 'fade': drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C, { alpha: FADE[step][0], grain: FADE[step][1] }); break;
+    case 'done': drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C); break;
+  }
+}
+
+// Targeted cell, opaque (lines and other cells stop at it). rel = frames after the click:
+// < 0 normal; +0..+2 slight zoom while a fill rises over everything; then a solid square
+// shrinks inside the cell and the pictogram comes back dark.
+function drawSelectedCell(k, rel) {
+  const { C, t } = layout, [x, y] = cellBox(k), name = GRID[k];
+  ui.fillStyle = OFF; ui.fillRect(x, y, C, C);
+  if (rel < 0) { drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C); return; }
+  if (rel < CLICK_FILL.length) {
+    const s = CLICK_CELL[rel], Cs = C * s, ts = t * s, o = (C - Cs) / 2;
+    ui.fillStyle = OFF; ui.fillRect(x + o, y + o, Cs, Cs);
+    drawFrame(ui, x + o, y + o, Cs, ts);
+    drawPicto(ui, name, x, y, C, { scale: CLICK_ICON[rel] });
+    ui.save(); ui.globalAlpha = CLICK_FILL[rel]; ui.fillStyle = ON;
+    ui.fillRect(x + o + ts, y + o + ts, Cs - 2 * ts, Cs - 2 * ts);
+    ui.restore();
+    return;
+  }
+  const i = rel - CLICK_FILL.length;
+  const sq = CLICK_SQUARE[Math.min(i, CLICK_SQUARE.length - 1)], S = C * sq, o = (C - S) / 2;
+  ui.fillStyle = ON; ui.fillRect(x + o, y + o, S, S);
+  const dark = i < CLICK_DARK.length ? CLICK_DARK[i] : 1;
+  if (dark > 0) drawPictoInverted(ui, name, x, y, C, dark, sq);
+}
+
+function reticleRects(cx, cy) {
+  const { C } = layout;
+  const bt = C * XH.bracket, arm = C * XH.bracketArm, off = C * XH.bracketOffset;
+  const bs = C + off * 2, bx = cx - bs / 2, by = cy - bs / 2;
+  return [[0, 0], [1, 0], [0, 1], [1, 1]].flatMap(([sx, sy]) => {
+    const px = bx + sx * bs, py = by + sy * bs;
+    return [[sx ? px - arm : px, sy ? py - bt : py, arm, bt], [sx ? px - bt : px, sy ? py - arm : py, bt, arm]];
+  });
+}
+
+function drawUI(f) {
+  const w = innerWidth, h = innerHeight, { C } = layout;
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.globalCompositeOperation = 'source-over'; ui.globalAlpha = 1;
+  ui.fillStyle = OFF; ui.fillRect(0, 0, w, h);
+
+  const rel = selection ? f - selection.start : -1;
+  const clicked = selection && rel >= XH.click;
+
+  // grid; the targeted cell is drawn later, on top of the crosshair lines.
+  // After the click the others vanish one per frame in reading order.
+  let order = 0;
+  GRID.forEach((name, k) => {
+    if (selection && k === selection.cell) return;
+    if (selection) {
+      const gone = clicked && rel >= XH.click + XH.vanishDelay + order;
+      order++;
+      if (gone) return;
+    }
+    drawCellAt(k, f);
+    if (!selection && hover === k && bootDone(f)) { const [x, y] = cellBox(k); drawBootBrackets(ui, x, y, C, layout.t); }
+  });
+  if (!selection) return;
+
+  // crosshair position and opacity
+  const p = rel < XH.moveStart ? 0 : travel(Math.min(1, (rel - XH.moveStart) / XH.moveFrames));
+  const cx = selection.from[0] + (selection.to[0] - selection.from[0]) * p;
+  const cy = selection.from[1] + (selection.to[1] - selection.from[1]) * p;
+  const alpha = Math.min(1, 0.1 + 0.9 * rel / XH.fadeFrames);
+  const L = C * XH.line, K = C * XH.knock;
+  const [tx, ty] = cellBox(selection.cell);
+
+  const lines = [[w * 0.027, cy - L / 2, w * 0.946, L], [cx - L / 2, h * 0.015, L, h * 0.97]];
+  const crel = rel - XH.click;
+  const angle = crel >= 0 ? ROT[Math.min(ROT.length - 1, crel)] * Math.PI / 180 : 0;
+  const zoom = crel >= 0 && crel < RETICLE_ZOOM.length ? RETICLE_ZOOM[crel] : 1;
+
+  // lines stay straight: dark margin first, then the bright stroke
+  ui.save(); ui.globalAlpha = alpha;
+  ui.fillStyle = OFF; for (const r of lines) rect(r, K);
+  ui.fillStyle = ON; for (const r of lines) rect(r);
+  ui.restore();
+
+  // targeted cell, opaque on top of the lines; after the click it turns with the reticle
+  ui.save();
+  ui.translate(tx + C / 2, ty + C / 2); ui.rotate(angle); ui.translate(-tx - C / 2, -ty - C / 2);
+  drawSelectedCell(selection.cell, crel);
+  ui.restore();
+
+  // reticle brackets: no dark margin, they merge with the cells they overlap
+  ui.save(); ui.globalAlpha = alpha; ui.fillStyle = ON;
+  ui.translate(cx, cy); ui.rotate(angle); ui.scale(zoom, zoom); ui.translate(-cx, -cy);
+  for (const r of reticleRects(cx, cy)) rect(r);
+  ui.restore();
+
+  // label typed next to the reticle
+  if (rel >= XH.labelStart) {
+    const text = `Archive entry ${String(selection.cell + 1).padStart(2, '0')} located. Opening file ...`;
+    const n = Math.min(text.length, Math.floor((rel - XH.labelStart) * XH.labelRate) + 1);
+    const off = C * XH.bracketOffset;
+    const lx = cx + C / 2 + off + C * 0.1, ly = cy - L / 2 - K - C * 0.08;
+    ui.save(); ui.globalAlpha = alpha;
+    ui.font = `700 ${Math.round(C * XH.label)}px "Handjet", monospace`;
+    ui.textBaseline = 'alphabetic'; ui.lineJoin = 'round';
+    ui.lineWidth = K * 1.6; ui.strokeStyle = OFF; ui.strokeText(text.slice(0, n), lx, ly);
+    ui.fillStyle = ON; ui.fillText(text.slice(0, n), lx, ly);
+    ui.restore();
+  }
+}
+
+function renderFrame(f) {
+  frameNow = f;
+  drawUI(f);
+  crt.upload(uiCanvas);
+  crt.render(f / FPS, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  const rel = selection ? f - selection.start : null;
+  hud.textContent = `frame ${String(f).padStart(4, '0')}${rel !== null ? `  (selection +${rel})` : ''}${slow ? '  ×0.25' : ''}${inverted ? '  inverted' : ''}\n` +
+    `hover + click a cell · arrows + Enter · Esc back · R replay boot · S slow · I invert · H hide`;
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+  crt.resize(W, H);
+  uiCanvas.width = W; uiCanvas.height = H;
+  layout = gridLayout(innerWidth, innerHeight);
+  if (selection) {
+    const [x, y] = cellBox(selection.cell);
+    selection.to = [x + layout.C / 2, y + layout.C / 2];
+  }
+}
+
+// ---- input -------------------------------------------------------------------------
+function cellAt(mx, my) {
+  const { C } = layout;
+  for (let k = 0; k < GRID.length; k++) {
+    const [x, y] = cellBox(k);
+    if (mx >= x && mx < x + C && my >= y && my < y + C) return k;
+  }
+  return null;
+}
+canvas.addEventListener('mousemove', e => {
+  if (selection || !bootDone(frameNow)) return;
+  hover = cellAt(e.clientX, e.clientY);
+  document.body.classList.toggle('hover', hover !== null);
+});
+canvas.addEventListener('mouseleave', () => { hover = null; document.body.classList.remove('hover'); });
+canvas.addEventListener('click', e => {
+  if (selection || !bootDone(frameNow)) return;
+  const k = cellAt(e.clientX, e.clientY);
+  if (k !== null) startSelection(k, frameNow);
+});
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'escape') { selection = null; }
+  if (k === 'r') resetBoot(frameNow, true);
+  if (k === 's') slow = !slow;
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+  if (!selection && bootDone(frameNow) && e.key.startsWith('Arrow')) {
+    const cur = hover ?? 7;
+    const col = cur % 5, row = Math.floor(cur / 5);
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    hover = Math.min(2, Math.max(0, row + d[1])) * 5 + Math.min(4, Math.max(0, col + d[0]));
+    e.preventDefault();
+  }
+  if (k === 'enter' && !selection && hover !== null && bootDone(frameNow)) startSelection(hover, frameNow);
+});
+addEventListener('resize', resize);
+
+// ---- clock -----------------------------------------------------------------------------
+let slow = false, vt = 0, last = performance.now();
+function loop(now) {
+  vt += (now - last) / 1000 * (slow ? 0.25 : 1); last = now;
+  renderFrame(Math.floor(vt * FPS));
+  requestAnimationFrame(loop);
+}
+
+Promise.all([document.fonts.load('700 40px "Handjet"'), document.fonts.load('12px "Share Tech Mono"')]).finally(() => {
+  resize();
+  resetBoot(0, params.get('boot') !== '0');
+  window.__setFrame = f => {
+    if (auto && f === auto[1] && !selection) startSelection(auto[0], f);
+    if (auto && f < auto[1]) selection = null;
+    renderFrame(f);
+  };
+  if (!freeze) requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
