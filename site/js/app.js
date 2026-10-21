@@ -63,7 +63,7 @@ const L = {
   band: [420, 1150], screen: [300, 345, 850, 585],
   back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
   home: [810, 640, 300, 90],
-  mute: [1736, 34, 148, 62],
+  mute: [1700, 38, 180, 60],   // sound bar
 };
 
 // ---- easing + keyframe helpers ------------------------------------------------------------------
@@ -638,38 +638,51 @@ function drawDetail(d) {
   if (d >= b.on) text('OR PRESS ESC', 960, 772, 15, { align: 'center', weight: 600 });
 }
 
-// ---- sound button (top-right) -----------------------------------------------------------------------------
-// hidden from the cut of the launch sequence until the detail page
+// ---- sound bar (top-right) ----------------------------------------------------------------------------------
+// A line that undulates while the sound is on (a little more when something plays) and calms down to
+// flat when muted. Hidden from the cut of the launch sequence until the detail page.
 function muteVisible(f) {
   if (muteShown === null) return false;
   if (launch && !['press', 'detail'].includes(launchState(f - launch.start).phase)) return false;
   return blinkOn(f - muteShown, 0);
 }
-function speakerIcon(cx, cy, s, col, off) {
-  const k = s * u, x = X(cx), y = Y(cy);
-  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = k * 0.11; ctx.lineCap = 'butt';
-  ctx.fillRect(x - k * 0.5, y - k * 0.17, k * 0.24, k * 0.34);
-  ctx.beginPath(); ctx.moveTo(x - k * 0.28, y - k * 0.17); ctx.lineTo(x - k * 0.02, y - k * 0.44);
-  ctx.lineTo(x - k * 0.02, y + k * 0.44); ctx.lineTo(x - k * 0.28, y + k * 0.17); ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  if (off) {
-    ctx.moveTo(x + k * 0.14, y - k * 0.2); ctx.lineTo(x + k * 0.52, y + k * 0.2);
-    ctx.moveTo(x + k * 0.52, y - k * 0.2); ctx.lineTo(x + k * 0.14, y + k * 0.2);
+const wave = { amp: Sound.muted ? 0 : 1, vel: 0, phase: 0, level: 0 };
+function updateWave(dt) {
+  if (Sound.muted) {
+    wave.amp *= Math.exp(-dt / 0.4); wave.vel = 0;                     // calms down over about a second
   } else {
-    ctx.arc(x + k * 0.02, y, k * 0.22, -0.85, 0.85);
-    ctx.moveTo(x + k * 0.02 + k * 0.42 * Math.cos(-0.85), y + k * 0.42 * Math.sin(-0.85));
-    ctx.arc(x + k * 0.02, y, k * 0.42, -0.85, 0.85);
+    wave.vel += ((1 - wave.amp) * 90 - wave.vel * 11) * dt;           // springs back with a little overshoot
+    wave.amp += wave.vel * dt;
+  }
+  wave.phase += dt * (1.2 + 5 * Math.max(0, wave.amp));               // and slows down as it flattens
+  wave.level += (Sound.level() - wave.level) * (1 - Math.exp(-dt / 0.06));
+}
+function drawSoundBar(f) {
+  if (!muteVisible(f)) return;
+  const [x, y, bw, bh] = L.mute, t = layout.C * 0.05, K = layout.C * 0.05;
+  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+  ctx.fillStyle = ON;
+  if (hoverId === 'mute') {
+    // hover: the corner brackets of the grid cells
+    const arm = 16, bt = t / u;
+    for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const px = x + sx * bw, py = y + sy * bh;
+      R(sx ? px - arm : px, sy ? py - bt : py, arm, bt);
+      R(sx ? px - bt : px, sy ? py - arm : py, bt, arm);
+    }
+  }
+  const x0 = X(x + 22), x1 = X(x + bw - 22), cy = Y(y + bh / 2);
+  const A = Y(15) * wave.amp * (0.8 + 0.5 * wave.level);
+  ctx.strokeStyle = ON; ctx.lineWidth = t; ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+  ctx.beginPath();
+  for (let i = 0; i <= 48; i++) {
+    const s = i / 48, env = Math.sin(Math.PI * s) ** 0.8;   // ends stay on the centre line
+    const dy = A * env * (0.62 * Math.sin(2 * Math.PI * 2.2 * s - wave.phase) + 0.38 * Math.sin(2 * Math.PI * 4.6 * s + wave.phase * 1.3));
+    if (i) ctx.lineTo(x0 + (x1 - x0) * s, cy + dy); else ctx.moveTo(x0, cy + dy);
   }
   ctx.stroke();
-}
-function drawMute(f) {
-  if (!muteVisible(f)) return;
-  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05, lit = hoverId === 'mute';
-  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
-  if (lit) R(x, y, bw, bh); else box(x, y, bw, bh, layout.C * 0.036);
-  const col = lit ? OFF : ON;
-  speakerIcon(x + 42, y + bh / 2, 36, col, Sound.muted);
-  text(Sound.muted ? 'OFF' : 'ON', x + 82, y + bh / 2 + 11, 22, { color: col });
+  // end stops anchor the bar
+  ctx.fillRect(x0 - t, cy - Y(11), t, Y(22)); ctx.fillRect(x1, cy - Y(11), t, Y(22));
 }
 
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
@@ -744,7 +757,7 @@ function drawScene(f) {
     if (fx.phase === 'detail') drawDetail(fx.d);
   } else if (selection) drawSelection(f);
   else drawIndex(f);
-  drawMute(f);
+  drawSoundBar(f);
   crt.upload(uiCanvas);
   crt.render(f / FPS, { inverted, lift: fx.lift || 0, blank: fx.blank || 0 });
 }
@@ -847,7 +860,9 @@ addEventListener('resize', resize);
 // ---- clock ----------------------------------------------------------------------------------------------------
 let vt = 0, last = performance.now();
 function loop(now) {
-  vt += Math.min(0.1, (now - last) / 1000); last = now;
+  const dt = Math.min(0.1, (now - last) / 1000);
+  vt += dt; last = now;
+  updateWave(dt);
   const prev = frameNow;
   frameNow = Math.floor(vt * FPS); nowT = vt;
   if (muteShown === null && bootDone(frameNow)) muteShown = frameNow;

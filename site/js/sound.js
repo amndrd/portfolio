@@ -5,6 +5,7 @@
 
 const Sound = (() => {
   let ac = null, out = null, noiseBuf = null, hissGain = null, humGain = null, drone = null, played = 0;
+  let analyser = null, scope = null;
   let muted = false;
   try { muted = localStorage.getItem('portfolio.muted') === '1'; } catch {}
   const LEVEL = 0.8, HISS = 0.0045, HUM = 0.0076;
@@ -19,6 +20,8 @@ const Sound = (() => {
     out = ac.createGain(); out.gain.value = muted ? 0 : LEVEL;
     const shelf = ac.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 6500; shelf.gain.value = -9;   // tames the top end, like a small speaker
     out.connect(shelf).connect(comp).connect(ac.destination);
+    analyser = ac.createAnalyser(); analyser.fftSize = 512; scope = new Float32Array(analyser.fftSize);
+    out.connect(analyser);
     noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
     const d = noiseBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -75,10 +78,17 @@ const Sound = (() => {
     init,
     get muted() { return muted; },
     get played() { return played; },
+    // output level, 0..1, for the sound bar
+    level() {
+      if (!analyser) return 0;
+      analyser.getFloatTimeDomainData(scope);
+      let sum = 0; for (const v of scope) sum += v * v;
+      return Math.min(1, Math.sqrt(sum / scope.length) * 12);
+    },
     setMuted(v) {
       muted = v;
       try { localStorage.setItem('portfolio.muted', v ? '1' : '0'); } catch {}
-      if (ac) out.gain.setTargetAtTime(v ? 0 : LEVEL, now(), 0.03);
+      if (ac) out.gain.setTargetAtTime(v ? 0 : LEVEL, now(), v ? 0.15 : 0.05);   // fades out with the sound bar
     },
     // room tone levels, as fractions of their normal level (tc: time constant in seconds)
     hiss(level = 1, tc = 0.08) { if (ac) hissGain.gain.setTargetAtTime(Math.max(0.0001, HISS * level), now(), tc); },

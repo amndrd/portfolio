@@ -24,7 +24,7 @@ Then open <http://localhost:8080>.
 | Drag / scroll on the ASCII screen | Orbit / zoom the 3D view |
 | BACK, HOME or Esc | Back to the grid |
 | LAUNCH or Enter | Start the launch sequence |
-| Sound button (top-right) or M | Mute / unmute |
+| Sound bar (top-right) or M | Mute / unmute: the waves calm down to a flat line |
 | I | Invert the colours (black on paper) |
 
 The mute and invert choices are saved in the browser. Browsers block audio until the first click or key press, so the first boot of the grid is silent.
