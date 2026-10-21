@@ -63,7 +63,7 @@ const L = {
   band: [420, 1150], screen: [300, 345, 850, 585],
   back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
   home: [810, 640, 300, 90],
-  mute: [1700, 38, 180, 60],   // sound bar
+  mute: [1690, 38, 190, 60],   // sound button
 };
 
 // ---- easing + keyframe helpers ------------------------------------------------------------------
@@ -638,51 +638,67 @@ function drawDetail(d) {
   if (d >= b.on) text('OR PRESS ESC', 960, 772, 15, { align: 'center', weight: 600 });
 }
 
-// ---- sound bar (top-right) ----------------------------------------------------------------------------------
-// A line that undulates while the sound is on (a little more when something plays) and calms down to
-// flat when muted. Hidden from the cut of the launch sequence until the detail page.
-function muteVisible(f) {
+// ---- sound button (top-right) -------------------------------------------------------------------------------
+// After igloo.inc: an outline speaker and a "Sound: On / Off" label in a monospace. On hover, on each toggle and
+// whenever the button comes back, the label decodes: characters come in from the left, each one a few code
+// points off its letter, and count down to it while the icon dims. Hidden from the cut of the launch sequence
+// until the detail page.
+const DECODE = { reveal: 16, step: 2, dim: 6 };   // frames: every character in, per code point, icon dimmed
+const SOUND_SIZE = 21;                             // font size
+let decode = { start: -1e9, offs: new Array(10).fill(0) }, muteWasOn = false;
+function muteOn(f) {
   if (muteShown === null) return false;
-  if (launch && !['press', 'detail'].includes(launchState(f - launch.start).phase)) return false;
-  return blinkOn(f - muteShown, 0);
+  return !launch || ['press', 'detail'].includes(launchState(f - launch.start).phase);
 }
-const wave = { amp: Sound.muted ? 0 : 1, vel: 0, phase: 0, level: 0 };
-function updateWave(dt) {
-  if (Sound.muted) {
-    wave.amp *= Math.exp(-dt / 0.4); wave.vel = 0;                     // calms down over about a second
-  } else {
-    wave.vel += ((1 - wave.amp) * 90 - wave.vel * 11) * dt;           // springs back with a little overshoot
-    wave.amp += wave.vel * dt;
-  }
-  wave.phase += dt * (1.2 + 5 * Math.max(0, wave.amp));               // and slows down as it flattens
-  wave.level += (Sound.level() - wave.level) * (1 - Math.exp(-dt / 0.06));
+function muteVisible(f) { return muteOn(f) && blinkOn(f - muteShown, 0); }
+function startDecode(f) {
+  decode = { start: f, offs: decode.offs.map(() => (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 4))) };
 }
-function drawSoundBar(f) {
-  if (!muteVisible(f)) return;
-  const [x, y, bw, bh] = L.mute, t = layout.C * 0.05, K = layout.C * 0.05;
-  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
-  ctx.fillStyle = ON;
-  if (hoverId === 'mute') {
-    // hover: the corner brackets of the grid cells
-    const arm = 16, bt = t / u;
-    for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const px = x + sx * bw, py = y + sy * bh;
-      R(sx ? px - arm : px, sy ? py - bt : py, arm, bt);
-      R(sx ? px - bt : px, sy ? py - arm : py, bt, arm);
-    }
+function decodedLabel(f) {
+  const str = Sound.muted ? 'Sound: Off' : 'Sound: On', n = str.length, rel = f - decode.start;
+  let out = '';
+  for (let i = 0; i < n; i++) {
+    const at = DECODE.reveal * (1 - Math.sqrt(1 - i / n));   // eases out: the first characters come in fastest
+    if (rel < at) break;
+    const off = decode.offs[i], left = Math.max(0, Math.abs(off) - Math.floor((rel - at) / DECODE.step));
+    out += str[i] === ' ' ? ' ' : String.fromCharCode(str.charCodeAt(i) + Math.sign(off) * left);
   }
-  const x0 = X(x + 22), x1 = X(x + bw - 22), cy = Y(y + bh / 2);
-  const A = Y(15) * wave.amp * (0.8 + 0.5 * wave.level);
-  ctx.strokeStyle = ON; ctx.lineWidth = t; ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+  return out;
+}
+// outline speaker, k tall, from its left edge; a cross when muted, a single short wave when on
+function speakerIcon(x, cy, k, off) {
   ctx.beginPath();
-  for (let i = 0; i <= 48; i++) {
-    const s = i / 48, env = Math.sin(Math.PI * s) ** 0.8;   // ends stay on the centre line
-    const dy = A * env * (0.62 * Math.sin(2 * Math.PI * 2.2 * s - wave.phase) + 0.38 * Math.sin(2 * Math.PI * 4.6 * s + wave.phase * 1.3));
-    if (i) ctx.lineTo(x0 + (x1 - x0) * s, cy + dy); else ctx.moveTo(x0, cy + dy);
+  ctx.moveTo(x, cy - k * 0.2); ctx.lineTo(x + k * 0.28, cy - k * 0.2); ctx.lineTo(x + k * 0.62, cy - k * 0.5);
+  ctx.lineTo(x + k * 0.62, cy + k * 0.5); ctx.lineTo(x + k * 0.28, cy + k * 0.2); ctx.lineTo(x, cy + k * 0.2); ctx.closePath();
+  ctx.moveTo(x + k * 0.28, cy - k * 0.2); ctx.lineTo(x + k * 0.28, cy + k * 0.2);
+  if (off) {
+    ctx.moveTo(x + k * 0.8, cy - k * 0.16); ctx.lineTo(x + k * 1.12, cy + k * 0.16);
+    ctx.moveTo(x + k * 1.12, cy - k * 0.16); ctx.lineTo(x + k * 0.8, cy + k * 0.16);
+  } else {
+    ctx.moveTo(x + k * 0.86, cy - k * 0.24); ctx.lineTo(x + k * 0.86, cy + k * 0.24);
   }
   ctx.stroke();
-  // end stops anchor the bar
-  ctx.fillRect(x0 - t, cy - Y(11), t, Y(22)); ctx.fillRect(x1, cy - Y(11), t, Y(22));
+}
+function drawSoundButton(f) {
+  const on = muteOn(f);
+  if (on && !muteWasOn) startDecode(f);
+  muteWasOn = on;
+  if (!muteVisible(f)) return;
+  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05;
+  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+  ctx.save();
+  const size = SOUND_SIZE * u, cap = size * 0.73, k = cap * 1.75, gap = size * 0.75;
+  ctx.font = `600 ${size}px "JetBrains Mono", monospace`;
+  const cw = ctx.measureText('M').width;
+  // the block ends on the right of the box with the longer label, so the text never moves while it decodes
+  const left = X(x + bw) - (k * 1.12 + gap + cw * 10), cy = Y(y + bh / 2), rel = f - decode.start;
+  ctx.strokeStyle = ON; ctx.lineWidth = size * 0.1; ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+  ctx.globalAlpha = rel >= 0 && rel < DECODE.dim ? 0.35 : 1;
+  speakerIcon(left, cy, k, Sound.muted);
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ON;
+  ctx.fillText(decodedLabel(f), left + k * 1.12 + gap, cy + cap / 2);
+  ctx.restore();
 }
 
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
@@ -757,7 +773,7 @@ function drawScene(f) {
     if (fx.phase === 'detail') drawDetail(fx.d);
   } else if (selection) drawSelection(f);
   else drawIndex(f);
-  drawSoundBar(f);
+  drawSoundButton(f);
   crt.upload(uiCanvas);
   crt.render(f / FPS, { inverted, lift: fx.lift || 0, blank: fx.blank || 0 });
 }
@@ -802,6 +818,7 @@ function targetAt(e) {
 }
 function toggleMute() {
   Sound.setMuted(!Sound.muted);
+  startDecode(frameNow);
   Sound.panelBip(0.6);   // only heard when the sound comes back on
 }
 canvas.addEventListener('pointerdown', e => {
@@ -828,6 +845,7 @@ canvas.addEventListener('pointermove', e => {
   const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
   const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
   if ((nextHover !== null && nextHover !== hover) || (nextId !== null && nextId !== hoverId)) Sound.tick(3200, 0.25);
+  if (nextId === 'mute' && hoverId !== 'mute') startDecode(frameNow);
   hover = nextHover; hoverId = nextId;
   canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
 });
@@ -860,9 +878,7 @@ addEventListener('resize', resize);
 // ---- clock ----------------------------------------------------------------------------------------------------
 let vt = 0, last = performance.now();
 function loop(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
-  vt += dt; last = now;
-  updateWave(dt);
+  vt += Math.min(0.1, (now - last) / 1000); last = now;
   const prev = frameNow;
   frameNow = Math.floor(vt * FPS); nowT = vt;
   if (muteShown === null && bootDone(frameNow)) muteShown = frameNow;
@@ -886,7 +902,7 @@ window.__portfolio = () => ({
 
 Promise.all([
   document.fonts.load('700 40px "Handjet"'), document.fonts.load('600 40px "Handjet"'),
-  document.fonts.load('800 20px "JetBrains Mono"'),
+  document.fonts.load('800 20px "JetBrains Mono"'), document.fonts.load('600 20px "JetBrains Mono"'),
 ]).finally(() => {
   ui.font = '700 100px "Handjet"';
   capRatio = ui.measureText('E').actualBoundingBoxAscent / 100 || 0.6;
