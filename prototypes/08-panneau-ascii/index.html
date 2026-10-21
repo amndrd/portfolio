@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 08 · ASCII panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=JetBrains+Mono:wght@800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script src="../shared/projects.js"></script>
+<script>
+// Prototype 08 — layout A reworked: live ASCII screen (3D, drag to orbit, scroll to zoom),
+// four render styles in the thumbnails, B-style specs for a code project, BACK / GITHUB / LAUNCH.
+// Keys: 1-4 render style, L layout (split / wide), I invert, H label.
+// URL params: ?l=split|wide&m=0..3&inv=0|1&cell=N&hud=0|1
+
+const params = new URLSearchParams(location.search);
+let layoutKey = params.get('l') === 'wide' ? 'wide' : 'split';
+let mode = Math.min(3, Math.max(0, Number(params.get('m') || 0)));
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const CELL = Number(params.get('cell') ?? 8);
+
+// placeholder content for a code project
+const INFO = {
+  language: 'GLSL + JS', type: 'REAL-TIME 3D', year: '2025', duration: '3 MONTHS',
+  composition: [['GLSL', 58], ['JS', 34], ['HTML', 8]],
+  stack: ['THREE.JS', 'WEBGL 2', 'VITE'],
+  files: ['12 SOURCE FILES', '4 SHADERS', '2 340 LINES'],
+  description: ['A gyroid sculpture raymarched in real time.', 'Every surface is computed per pixel, then', 'rendered as text. Drag to orbit, scroll to zoom.'],
+};
+const MODES = [
+  ['SOLID', 'DRAG TO ORBIT, SCROLL TO ZOOM'],
+  ['WIRE', 'WIREFRAME, DRAG TO ORBIT'],
+  ['CODE', 'THE SHAPE IS MADE OF ITS OWN SOURCE'],
+  ['FIELD', 'HEIGHT MAP, DRAG TO ORBIT'],
+];
+const CODE_TEXT = 'float gyroid(vec3 p){return dot(sin(p*3.0),cos(p.yzx*3.0))/3.0;}float map(vec3 p){float s=length(p)-1.05;' +
+  'return max(s,abs(gyroid(p))-0.1);}vec3 normal(vec3 p){vec2 e=vec2(0.003,0.);return normalize(vec3(map(p+e.xyy)-map(p-e.xyy),' +
+  'map(p+e.yxy)-map(p-e.yxy),map(p+e.yyx)-map(p-e.yyx)));}void main(){vec3 ro=vec3(0.,0.,3.2),rd=normalize(vec3(uv,-1.6));';
+const RAMP = ' .,-~:;=!*#$@';   // short luminance ramp: reads better than long ones at this size
+const ALPHA = [0.55, 0.75, 0.9, 1];
+
+// ---- layouts (1920×1080 design space; the area under the reticle, x < 420 / y < 340, stays free)
+const LAYOUTS = {
+  split: {
+    band: [420, 1150], screen: [300, 345, 850, 445],
+    thumbs: [0, 1, 2, 3].map(i => [300 + i * 218, 812, 196, 100]),
+    back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
+  },
+  wide: {
+    band: [420, 1490], screen: [300, 345, 1190, 445],
+    thumbs: [0, 1, 2, 3].map(i => [1530, 345 + i * 115, 330, 98]),
+    back: [1530, 250, 330, 70], github: [1290, 950, 270, 80], launch: [1590, 950, 270, 80],
+  },
+};
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+const staticCanvas = document.createElement('canvas');
+const sctx = staticCanvas.getContext('2d');
+let ctx = sctx, dpr, layout, capRatio = 0.6, w, h, u, L;
+let hoverId = null, flashUntil = -1, frameNo = 0;
+
+// ---- drawing helpers, in design coordinates -------------------------------------
+const X = v => v / 1920 * w, Y = v => v / 1080 * h;
+function R(x, y, rw, rh, col = ON) { ctx.fillStyle = col; ctx.fillRect(X(x), Y(y), X(rw), Y(rh)); }
+function box(x, y, bw, bh, t, col = ON) {
+  ctx.fillStyle = col;
+  const px = X(x), py = Y(y), pw = X(bw), ph = Y(bh);
+  ctx.fillRect(px, py, pw, t); ctx.fillRect(px, py + ph - t, pw, t);
+  ctx.fillRect(px, py, t, ph); ctx.fillRect(px + pw - t, py, t, ph);
+}
+function setFont(cap, weight = 700) { ctx.font = `${weight} ${Math.round(cap * u / capRatio)}px "Handjet", monospace`; }
+function text(str, x, y, cap, { align = 'left', color = ON, weight = 700 } = {}) {
+  setFont(cap, weight); ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color; ctx.fillText(str, X(x), Y(y));
+}
+const textW = (str, cap, weight = 700) => { setFont(cap, weight); return ctx.measureText(str).width / w * 1920; };
+function arrow(cx, cy, s, dir, col = ON) {
+  const x = X(cx), y = Y(cy), k = s * u;
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x + dir * k * 0.5, y); ctx.lineTo(x, y - k * 0.45); ctx.lineTo(x, y - k * 0.18);
+  ctx.lineTo(x - dir * k * 0.5, y - k * 0.18); ctx.lineTo(x - dir * k * 0.5, y + k * 0.18);
+  ctx.lineTo(x, y + k * 0.18); ctx.lineTo(x, y + k * 0.45); ctx.closePath(); ctx.fill();
+}
+// generic branch icon (two commits + a merge), drawn, not a logo
+function branchIcon(cx, cy, s, col) {
+  const k = s * u, x = X(cx), y = Y(cy);
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = k * 0.14;
+  ctx.beginPath(); ctx.moveTo(x - k * 0.25, y - k * 0.38); ctx.lineTo(x - k * 0.25, y + k * 0.38);
+  ctx.moveTo(x + k * 0.25, y - k * 0.2); ctx.quadraticCurveTo(x + k * 0.25, y + k * 0.12, x - k * 0.25, y + k * 0.18); ctx.stroke();
+  for (const [ox, oy] of [[-0.25, -0.42], [-0.25, 0.42], [0.25, -0.28]]) { ctx.beginPath(); ctx.arc(x + ox * k, y + oy * k, k * 0.13, 0, Math.PI * 2); ctx.fill(); }
+}
+const inRect = (px, py, [x, y, bw, bh]) => px >= x && px < x + bw && py >= y && py < y + bh;
+
+// ---- header: final state of prototype 06 -------------------------------------------
+function drawHeader() {
+  const { C } = layout;
+  const cx = X(270), cy = Y(206), Lw = C * 0.068, K = C * 0.05;
+  ctx.fillStyle = OFF; ctx.fillRect(w * 0.027 - K, cy - Lw / 2 - K, w * 0.946 + 2 * K, Lw + 2 * K); ctx.fillRect(cx - Lw / 2 - K, h * 0.015 - K, Lw + 2 * K, h * 0.97 + 2 * K);
+  ctx.fillStyle = ON; ctx.fillRect(w * 0.027, cy - Lw / 2, w * 0.946, Lw); ctx.fillRect(cx - Lw / 2, h * 0.015, Lw, h * 0.97);
+  const x = cx - C / 2, y = cy - C / 2, S = C * 0.865;
+  ctx.fillStyle = OFF; ctx.fillRect(x, y, C, C);
+  ctx.fillStyle = ON; ctx.fillRect(x + (C - S) / 2, y + (C - S) / 2, S, S);
+  drawPictoInverted(ctx, GRID[CELL], x, y, C, 1, 0.865);
+  const bt = C * 0.07, arm = C * 0.35, off = C * 0.15, bs = C + off * 2, bx = cx - bs / 2, by = cy - bs / 2;
+  ctx.fillStyle = ON;
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const px = bx + sx * bs, py = by + sy * bs;
+    ctx.fillRect(sx ? px - arm : px, sy ? py - bt : py, arm, bt);
+    ctx.fillRect(sx ? px - bt : px, sy ? py - arm : py, bt, arm);
+  }
+  const lx = cx + C / 2 + off + C * 0.1;
+  ctx.font = `700 ${Math.round(C * 0.15)}px "Handjet", monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`Archive entry ${String(CELL + 1).padStart(2, '0')} located. Opening file ...`, lx, cy - 0.64 * C);
+  setFont(0.3 * 180.48); ctx.fillText(`ENTRY ${String(CELL + 1).padStart(2, '0')}: ${PROJECTS[CELL].title}`, lx, cy - 0.2 * C);
+}
+
+// ---- buttons: outline, inverted on hover ------------------------------------------------
+function button(id, [x, y, bw, bh], label, cap, t, icon) {
+  const on = hoverId === id;
+  if (on) R(x, y, bw, bh); else box(x, y, bw, bh, t);
+  const col = on ? OFF : ON;
+  const tw = textW(label, cap), iw = icon ? cap * 1.5 : 0, x0 = x + (bw - tw - iw) / 2;
+  if (icon === 'back') arrow(x0 + cap * 0.55, y + bh / 2, cap * 1.1, -1, col);
+  if (icon === 'git') branchIcon(x0 + cap * 0.5, y + bh / 2, cap * 1.3, col);
+  text(label, x0 + iw, y + bh / 2 + cap / 2, cap, { color: col });
+}
+
+// B-style data block: small label, big value
+function block(x, y0, label, value) {
+  text(label, x, y0 + 26, 15, { weight: 600 });
+  text(value, x, y0 + 72, 26);
+}
+function compositionBar(x, y, bw, bh, thin) {
+  let cx = x;
+  INFO.composition.forEach(([, pct], i) => {
+    const sw = bw * pct / 100;
+    swatch(i, cx, y, sw, bh, thin);
+    cx += sw;
+  });
+}
+function swatch(kind, x, y, sw, sh, thin) {
+  if (kind === 0) R(x, y, sw, sh);
+  else {
+    ctx.save(); ctx.beginPath(); ctx.rect(X(x), Y(y), X(sw), Y(sh)); ctx.clip();
+    if (kind === 1) {
+      ctx.strokeStyle = ON; ctx.lineWidth = 4 * u; ctx.beginPath();
+      for (let k = -sh; k < sw; k += 12) { ctx.moveTo(X(x + k), Y(y + sh)); ctx.lineTo(X(x + k + sh), Y(y)); }
+      ctx.stroke();
+    } else for (let yy = y + 5; yy < y + sh - 2; yy += 10) for (let xx = x + 5; xx < x + sw - 2; xx += 10) R(xx - 2, yy - 2, 4, 4);
+    ctx.restore();
+    box(x, y, sw, sh, thin * 0.7);
+  }
+}
+function legend(x, y) {
+  let cx = x;
+  INFO.composition.forEach(([name, pct], i) => {
+    swatch(i, cx, y - 16, 18, 18, layout.C * 0.03);
+    const label = `${name} ${pct}%`;
+    text(label, cx + 28, y, 16, { weight: 600 });
+    cx += 28 + textW(label, 16, 600) + 34;
+  });
+}
+function list(x, y, title, items, step = 38) {
+  text(title, x, y, 15, { weight: 600 });
+  items.forEach((s, i) => { R(x, y + 23 + i * step, 14, 14); text(s, x + 30, y + 38 + i * step, 19); });
+}
+
+// ---- static layer: everything except the live ASCII ---------------------------------
+function drawStatic() {
+  ctx = sctx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = OFF; ctx.fillRect(0, 0, w, h);
+  drawHeader();
+  const st = layout.C * 0.05, thin = layout.C * 0.036;
+  const [b0, b1] = L.band, [sx, sy, sw, sh] = L.screen;
+
+  // band above the screen: view tab, caption, live readout, ruler
+  R(b0, 250, 150, 44); text(`VIEW 0${mode + 1}`, b0 + 75, 284, 22, { align: 'center', color: OFF });
+  text(`${MODES[mode][0]}  -  ${MODES[mode][1]}`, b0 + 174, 284, 20);
+  text(`${grid.cols}x${grid.rows}`, b1, 284, 20, { align: "right" });
+  for (let x = b0; x <= b1; x += 16) R(x, 308, 6, 22);
+  box(sx, sy, sw, sh, st);
+
+  L.thumbs.forEach((r, i) => {
+    const sel = i === mode, hov = hoverId === `thumb${i}`;
+    box(r[0], r[1], r[2], r[3], sel || hov ? st : thin);
+    const tw = textW(`0${i + 1} ${MODES[i][0]}`, 13) + 18;
+    if (sel) R(r[0], r[1], tw, 26); else R(r[0], r[1], tw, 26, OFF);
+    text(`0${i + 1} ${MODES[i][0]}`, r[0] + 9, r[1] + 20, 13, { color: sel ? OFF : ON });
+  });
+
+  button('back', L.back, 'BACK', 22, thin, 'back');
+  button('github', L.github, 'GITHUB', layoutKey === 'split' ? 24 : 22, thin, 'git');
+  button('launch', L.launch, 'LAUNCH', layoutKey === 'split' ? 36 : 30, st);
+
+  if (layoutKey === 'split') {
+    text('OR PRESS ESC', 545, 1002, 15, { weight: 600 });
+    const x0 = 1200, x1 = 1540, xr = 1860;
+    block(x0, 250, 'LANGUAGE', INFO.language); block(x1, 250, 'YEAR', INFO.year);
+    R(x0, 340, xr - x0, thin / u);
+    block(x0, 355, 'TYPE', INFO.type); block(x1, 355, 'DURATION', INFO.duration);
+    R(x0, 445, xr - x0, thin / u);
+    text('COMPOSITION', x0, 490, 15, { weight: 600 });
+    compositionBar(x0, 506, xr - x0, 34, thin);
+    legend(x0, 578);
+    R(x0, 602, xr - x0, thin / u);
+    list(x0, 645, 'STACK', INFO.stack);
+    list(x1, 645, 'FILES', INFO.files);
+    INFO.description.forEach((line, i) => text(line, x0, 818 + i * 36, 17, { weight: 600 }));
+  } else {
+    // strip under the screen: data blocks | composition + stack | description + buttons
+    block(300, 812, 'LANGUAGE', INFO.language); block(540, 812, 'YEAR', INFO.year);
+    R(300, 905, 460, thin / u);
+    block(300, 918, 'TYPE', INFO.type); block(540, 918, 'DURATION', INFO.duration);
+    R(780, 830, thin / u, 190); R(1270, 830, thin / u, 190);
+    text('COMPOSITION', 800, 838, 15, { weight: 600 });
+    compositionBar(800, 852, 450, 30, thin);
+    legend(800, 920);
+    text('STACK', 800, 968, 15, { weight: 600 }); text(INFO.stack.join('  /  '), 880, 968, 17);
+    text('FILES', 800, 1010, 15, { weight: 600 }); text(INFO.files.join('  /  '), 880, 1010, 17);
+    INFO.description.forEach((line, i) => text(line, 1290, 840 + i * 34, 16, { weight: 600 }));
+  }
+}
+
+// ---- ASCII renderer ---------------------------------------------------------------------
+const cam = { yaw: 0.6, pitch: 0.32, dist: 3.2, vyaw: 0, vpitch: 0 };
+let grid = { cols: 0, rows: 0, aw: 0, lh: 0, fs: 0 };
+
+function rot(v, yaw, pitch) {
+  let [x, y, z] = v;
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  [y, z] = [y * cp - z * sp, y * sp + z * cp];
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return [x * c + z * s, y, -x * s + z * c];
+}
+function rotInv(v, yaw, pitch) {
+  let [x, y, z] = v;
+  const c = Math.cos(-yaw), s = Math.sin(-yaw);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  const cp = Math.cos(-pitch), sp = Math.sin(-pitch);
+  return [x, y * cp - z * sp, y * sp + z * cp];
+}
+function gyroidBall(x, y, z) {
+  const s = 3.0;
+  const g = (Math.sin(x * s) * Math.cos(y * s) + Math.sin(y * s) * Math.cos(z * s) + Math.sin(z * s) * Math.cos(x * s)) / s;
+  return Math.max(Math.hypot(x, y, z) - 1.05, Math.abs(g) - 0.1);
+}
+function field(x, y, z, t) {
+  const r = Math.hypot(x, z);
+  const hgt = 0.28 * Math.sin(x * 1.8 + t * 0.6) * Math.cos(z * 1.4) + 0.12 * Math.sin(x * 3.3 + z * 2.6) + 0.1 * Math.cos(r * 5 - t * 1.5);
+  return Math.max(y - hgt, Math.abs(x) - 1.15, Math.abs(z) - 1.15, -y - 0.45);
+}
+
+// Raymarch one grid; returns per-cell char codes and brightness levels (-1 = empty).
+function raymarch(cols, rows, aw, lh, sdf, stepScale, codeChars) {
+  const chars = new Uint16Array(cols * rows), levels = new Int8Array(cols * rows).fill(-1);
+  const half = rows * lh / 2, f = 0.42;
+  const ro = rot([0, 0, cam.dist], cam.yaw, cam.pitch);
+  let lx = -0.5, ly = 0.65, lz = 0.6; const ln = Math.hypot(lx, ly, lz);
+  [lx, ly, lz] = rot([lx / ln, ly / ln, lz / ln], cam.yaw, cam.pitch);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const px = (i + 0.5 - cols / 2) * aw / half * f, py = (rows / 2 - j - 0.5) * lh / half * f;
+    const n0 = Math.hypot(px, py, 1);
+    const rd = rot([px / n0, py / n0, -1 / n0], cam.yaw, cam.pitch);
+    let t = 0, k = 0, hit = false;
+    for (; k < 64; k++) {
+      const d = sdf(ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t);
+      if (d < 0.003) { hit = true; break; }
+      t += d * stepScale;
+      if (t > 7) break;
+    }
+    if (!hit) continue;
+    const x = ro[0] + rd[0] * t, y = ro[1] + rd[1] * t, z = ro[2] + rd[2] * t, e = 0.003;
+    let nx = sdf(x + e, y, z) - sdf(x - e, y, z), ny = sdf(x, y + e, z) - sdf(x, y - e, z), nz = sdf(x, y, z + e) - sdf(x, y, z - e);
+    const nn = Math.hypot(nx, ny, nz) || 1; nx /= nn; ny /= nn; nz /= nn;
+    const diff = Math.max(0, nx * lx + ny * ly + nz * lz);
+    const wrap = Math.max(0, (nx * lx + ny * ly + nz * lz + 0.35) / 1.35);   // wrap lighting keeps the far side readable
+    const lum = Math.min(1, Math.max(0, (0.08 + 0.92 * (0.6 * diff + 0.4 * wrap)) * (1 - 0.45 * k / 64)));
+    const idx = j * cols + i;
+    levels[idx] = Math.min(3, Math.floor(lum * 4));
+    chars[idx] = codeChars ? codeChars.charCodeAt(idx % codeChars.length) : RAMP.charCodeAt(Math.max(1, Math.round(lum * (RAMP.length - 1))));
+    if (codeChars && lum < 0.12) levels[idx] = -1;
+  }
+  return { chars, levels };
+}
+
+// Wireframe torus: edges rasterised on the character grid, glyph picked from the slope.
+function wire(cols, rows, aw, lh) {
+  const chars = new Uint16Array(cols * rows), levels = new Int8Array(cols * rows).fill(-1), depth = new Float32Array(cols * rows).fill(1e9);
+  const half = rows * lh / 2, f = 0.42, U = 22, V = 11, Rr = 0.82, r = 0.36;
+  const pts = [];
+  for (let a = 0; a < U; a++) for (let b = 0; b < V; b++) {
+    const th = a / U * Math.PI * 2, ph = b / V * Math.PI * 2;
+    const p = [(Rr + r * Math.cos(ph)) * Math.cos(th), r * Math.sin(ph), (Rr + r * Math.cos(ph)) * Math.sin(th)];
+    const n = [Math.cos(ph) * Math.cos(th), Math.sin(ph), Math.cos(ph) * Math.sin(th)];
+    const c = rotInv(p, cam.yaw, cam.pitch), cn = rotInv(n, cam.yaw, cam.pitch);
+    const zc = cam.dist - c[2];
+    pts.push({ i: cols / 2 + c[0] / zc / f * half / aw, j: rows / 2 - c[1] / zc / f * half / lh, z: zc, front: cn[2] > -0.05 });
+  }
+  const put = (i, j, ch, z, lvl) => {
+    i = Math.round(i); j = Math.round(j);
+    if (i < 0 || j < 0 || i >= cols || j >= rows) return;
+    const k = j * cols + i;
+    if (z < depth[k] || lvl > levels[k]) { depth[k] = z; levels[k] = lvl; chars[k] = ch.charCodeAt(0); }
+  };
+  const edge = (p, q) => {
+    const di = q.i - p.i, dj = q.j - p.j, n = Math.ceil(Math.max(Math.abs(di), Math.abs(dj)) * 1.3) + 1;
+    const dx = di * aw, dy = dj * lh, ang = Math.abs(Math.atan2(dy, dx));
+    const front = p.front && q.front;
+    let ch = '/';
+    if (ang < 0.39 || ang > 2.75) ch = '-'; else if (ang > 1.18 && ang < 1.96) ch = '|'; else ch = (dx * dy > 0) ? '\\' : '/';
+    for (let s = 0; s <= n; s++) {
+      const t = s / n;
+      put(p.i + di * t, p.j + dj * t, front ? ch : '.', p.z + (q.z - p.z) * t, front ? 2 : 0);
+    }
+  };
+  for (let a = 0; a < U; a++) for (let b = 0; b < V; b++) {
+    const p = pts[a * V + b];
+    edge(p, pts[((a + 1) % U) * V + b]);
+    edge(p, pts[a * V + (b + 1) % V]);
+  }
+  for (const p of pts) if (p.front) put(p.i, p.j, 'o', p.z - 0.01, 3);
+  return { chars, levels };
+}
+
+function renderMode(m, cols, rows, aw, lh, t) {
+  if (m === 0) return raymarch(cols, rows, aw, lh, gyroidBall, 0.6);
+  if (m === 1) return wire(cols, rows, aw, lh);
+  if (m === 2) return raymarch(cols, rows, aw, lh, gyroidBall, 0.6, CODE_TEXT);
+  const saved = { ...cam };
+  cam.pitch = Math.max(0.45, cam.pitch + 0.2); cam.dist *= 1.3;
+  const out = raymarch(cols, rows, aw, lh, (x, y, z) => field(x, y, z, t), 0.45);
+  Object.assign(cam, { pitch: saved.pitch, dist: saved.dist });
+  return out;
+}
+
+// draw a rendered grid: one fillText per row and brightness level (monospace keeps columns aligned)
+function drawGrid({ chars, levels }, cols, rows, x0, y0, aw, lh, fs) {
+  ui.font = `800 ${fs}px "JetBrains Mono", monospace`;
+  ui.textBaseline = 'top'; ui.textAlign = 'left'; ui.fillStyle = ON;
+  for (let lvl = 0; lvl < 4; lvl++) {
+    ui.globalAlpha = ALPHA[lvl];
+    for (let j = 0; j < rows; j++) {
+      let line = '', any = false;
+      for (let i = 0; i < cols; i++) {
+        const k = j * cols + i;
+        if (levels[k] === lvl) { line += String.fromCharCode(chars[k]); any = true; } else line += ' ';
+      }
+      if (any) ui.fillText(line, x0, y0 + j * lh);
+    }
+  }
+  ui.globalAlpha = 1;
+}
+
+function measureGrid() {
+  const [, , sw, sh] = L.screen, inset = 22;
+  ui.font = `800 ${11 * u}px "JetBrains Mono", monospace`;
+  const fs = 11 * u, aw = ui.measureText('M').width, lh = fs * 1.08;
+  grid = { fs, aw, lh, cols: Math.floor((X(sw) - X(2 * inset)) / aw), rows: Math.floor((Y(sh) - Y(2 * inset)) / lh) };
+}
+
+function drawDynamic(t) {
+  ctx = ui;
+  ui.setTransform(1, 0, 0, 1, 0, 0);
+  ui.drawImage(staticCanvas, 0, 0);
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const [sx, sy, sw, sh] = L.screen, inset = 22;
+  const { cols, rows, aw, lh, fs } = grid;
+  const x0 = X(sx + inset) + (X(sw - 2 * inset) - cols * aw) / 2, y0 = Y(sy + inset) + (Y(sh - 2 * inset) - rows * lh) / 2;
+  if (frameNo < flashUntil) { R(sx + 14, sy + 14, sw - 28, sh - 28); }
+  else drawGrid(renderMode(mode, cols, rows, aw, lh, t), cols, rows, x0, y0, aw, lh, fs);
+
+  // thumbnails: the same object in each render style, smaller grid
+  L.thumbs.forEach((r, i) => {
+    const tfs = 9 * u, tlh = tfs * 1.08;
+    ui.font = `800 ${tfs}px "JetBrains Mono", monospace`;
+    const taw = ui.measureText('M').width;
+    const tc = Math.floor((X(r[2]) - X(24)) / taw), tr = Math.floor((Y(r[3]) - Y(40)) / tlh);
+    const tx = X(r[0] + 12) + (X(r[2] - 24) - tc * taw) / 2, ty = Y(r[1] + 30);
+    const dist = cam.dist; cam.dist = dist * 0.72;   // closer camera so the object fills the short grid
+    drawGrid(renderMode(i, tc, tr, taw, tlh, t), tc, tr, tx, ty, taw, tlh, tfs);
+    cam.dist = dist;
+  });
+}
+
+// ---- frame loop + input -------------------------------------------------------------------
+let drag = null, lastInput = -1e9;
+function loop(now) {
+  frameNo++;
+  if (!drag) {
+    cam.yaw += cam.vyaw; cam.pitch += cam.vpitch;
+    cam.vyaw *= 0.94; cam.vpitch *= 0.9;
+    if (now - lastInput > 2500) cam.yaw += 0.004;   // idle: slow turntable
+  }
+  cam.pitch = Math.max(-1.2, Math.min(1.2, cam.pitch));
+  drawDynamic(now / 1000);
+  crt.upload(uiCanvas);
+  crt.render(now / 1000, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `layout ${layoutKey} · view ${MODES[mode][0]}${inverted ? ' · inverted' : ''}\n` +
+    `drag the screen to orbit · scroll to zoom · 1-4 view · L layout · I invert · H hide`;
+  requestAnimationFrame(loop);
+}
+
+function setMode(m) { if (m === mode) return; mode = m; flashUntil = frameNo + 3; drawStatic(); }
+const design = e => [e.clientX / w * 1920, e.clientY / h * 1080];
+function targetAt(px, py) {
+  if (inRect(px, py, L.back)) return 'back';
+  if (inRect(px, py, L.github)) return 'github';
+  if (inRect(px, py, L.launch)) return 'launch';
+  const t = L.thumbs.findIndex(r => inRect(px, py, r));
+  if (t >= 0) return `thumb${t}`;
+  if (inRect(px, py, L.screen)) return 'screen';
+  return null;
+}
+canvas.addEventListener('pointerdown', e => {
+  const target = targetAt(...design(e));
+  lastInput = performance.now();
+  if (target === 'screen') { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; }
+  else if (target && target.startsWith('thumb')) setMode(Number(target.slice(5)));
+});
+canvas.addEventListener('pointermove', e => {
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    cam.yaw -= dx * 0.008; cam.pitch += dy * 0.006;
+    cam.vyaw = -dx * 0.008; cam.vpitch = dy * 0.006;
+    drag = { x: e.clientX, y: e.clientY }; lastInput = performance.now();
+    return;
+  }
+  const target = targetAt(...design(e));
+  const id = target === 'screen' ? null : target;
+  canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
+  if (id !== hoverId) { hoverId = id; drawStatic(); }
+});
+addEventListener('pointerup', () => { if (drag) { drag = null; canvas.style.cursor = 'grab'; } });
+canvas.addEventListener('wheel', e => {
+  if (targetAt(...design(e)) !== 'screen') return;
+  cam.dist = Math.max(2.1, Math.min(5.5, cam.dist * (1 + e.deltaY * 0.001)));
+  lastInput = performance.now(); e.preventDefault();
+}, { passive: false });
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if ('1234'.includes(k) && k.length === 1) setMode(Number(k) - 1);
+  if (k === 'l') { layoutKey = layoutKey === 'split' ? 'wide' : 'split'; resize(); }
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+});
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  w = innerWidth; h = innerHeight;
+  const W = Math.round(w * dpr), H = Math.round(h * dpr);
+  crt.resize(W, H);
+  uiCanvas.width = staticCanvas.width = W; uiCanvas.height = staticCanvas.height = H;
+  layout = gridLayout(w, h);
+  u = layout.C / 180.48;
+  L = LAYOUTS[layoutKey];
+  ctx = ui; ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  measureGrid();
+  drawStatic();
+}
+addEventListener('resize', resize);
+
+Promise.all([
+  document.fonts.load('700 40px "Handjet"'), document.fonts.load('600 40px "Handjet"'),
+  document.fonts.load('800 20px "JetBrains Mono"'), document.fonts.load('12px "Share Tech Mono"'),
+]).finally(() => {
+  sctx.font = '700 100px "Handjet"';
+  capRatio = sctx.measureText('E').actualBoundingBoxAscent / 100 || 0.6;
+  resize();
+  requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
