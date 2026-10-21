@@ -168,7 +168,7 @@ function startSelection(cell, f) {
   selection = { cell, start: f, from, to };
   hover = null; hoverId = null;
   resetCam();
-  Sound.beep();
+  Sound.play('select');
 }
 function startLaunch(f) {
   // draw the current (complete) panel off-screen to collect every text, bottom line first
@@ -178,13 +178,13 @@ function startLaunch(f) {
   record = null; ctx = ui;
   launch = { start: f, cell: selection.cell, texts, log: bootLog(ENTRIES[selection.cell], entryId(selection.cell)) };
   hoverId = null;
-  Sound.confirm();
+  Sound.play('launch');
 }
 function goHome(f) {
   selection = null; launch = null; hover = null; hoverId = null;
   resetBoot(f);
-  Sound.hiss(1, 0.2); Sound.hum(1, 0.2);
-  Sound.back();
+  Sound.start('room');
+  Sound.play('back');
 }
 
 // ---- drawing helpers, in design coordinates --------------------------------------------------------
@@ -704,55 +704,46 @@ function drawSoundButton(f) {
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
 const LABEL_LEN = 'Archive entry 00 located. Opening file ...'.length;
 const typed = (rel, start, rate, len) => rel >= start && rel < start + len / rate;
-// continuous crackle while the grid boots, plus a burst on each cell's own steps
+// a loop while the grid boots, plus a cue as each cell appears
 const BOOT_END = BOOT_START + (GRID.length - 1) * BOOT_STEP + 41;
 function bootSfx(n) {
   const r = n - bootOffset;
-  if (r >= BOOT_START && r < BOOT_END && Math.random() < 0.5) Sound.crackle(0.25);
-  for (let k = 0; k < GRID.length; k++) {
-    const rel = r - triggerAt[k];
-    if (rel === 0 || rel === 5) Sound.crackle(0.7);
-    else if (rel === 2 || rel === 37) Sound.crackle(0.35);
-    else if (rel === 32) Sound.crackle(0.5);
-  }
+  if (r === BOOT_START) Sound.start('boot');
+  if (r === BOOT_END) Sound.stop('boot');
+  for (let k = 0; k < GRID.length; k++) if (r - triggerAt[k] === 0) Sound.play('cell');
 }
 function selectionSfx(rel) {
   const crel = rel - XH.click, p = ENTRIES[selection.cell];
-  if (rel === XH.moveStart) Sound.sweep(XH.moveFrames / FPS);
-  if (typed(rel, XH.labelStart, XH.labelRate, LABEL_LEN) && rel % 2 === 0) Sound.type(0.3);
-  if (crel === 0) Sound.click();
-  if (crel >= XH.vanishDelay && crel < XH.vanishDelay + GRID.length - 1) Sound.shatter(0.7);   // cells vanishing
-  if (crel === MOVE.start) Sound.whoosh(MOVE.frames / FPS);
-  if (typed(crel, TITLE.start, TITLE.rate, p.title.length + 10)) Sound.type(0.35);
+  if (rel === XH.moveStart) Sound.play('travel');
+  if (typed(rel, XH.labelStart, XH.labelRate, LABEL_LEN) && rel % 2 === 0) Sound.play('type');
+  if (crel === 0) Sound.play('lock');
+  if (crel === XH.vanishDelay) Sound.play('vanish');   // the other cells vanish, one per frame
+  if (crel === MOVE.start) Sound.play('move');
+  if (typed(crel, TITLE.start, TITLE.rate, p.title.length + 10)) Sound.play('type');
   // panel build
-  if (crel >= BUILD.ruler[0] && crel < BUILD.ruler[1] && crel % 2 === 0) Sound.tick(3000 + (crel - BUILD.ruler[0]) * 12, 0.7);
-  if (crel === BUILD.tab[0][0]) Sound.panelBip(0.5);
-  if (crel === BUILD.ascii[0]) Sound.scan((BUILD.ascii[1] - BUILD.ascii[0]) / FPS);
-  for (const at of [BUILD.block1, BUILD.block2, BUILD.bar[0]]) if (crel === at || crel === at + 6) Sound.panelBip(0.6);
-  if (BUILD.rows.includes(crel)) Sound.panelBip(0.7);
-  if (crel === BUILD.launch.dim[0]) Sound.panelBip(0.4, 1460);
-  if (crel === BUILD.launch.on) Sound.panelBip(0.7);
-  if (crel === BUILD.github) Sound.panelBip(0.5);
+  if (crel >= BUILD.ruler[0] && crel < BUILD.ruler[1] && crel % 2 === 0) Sound.play('tick');
+  if (crel === BUILD.tab[0][0]) Sound.play('panel');
+  if (crel === BUILD.ascii[0]) Sound.play('scan');
+  for (const at of [BUILD.block1, BUILD.block2, BUILD.bar[0]]) if (crel === at || crel === at + 6) Sound.play('panel');
+  if (BUILD.rows.includes(crel)) Sound.play('panel');
+  if (crel === BUILD.launch.dim[0] || crel === BUILD.launch.on) Sound.play('panel');
+  if (crel === BUILD.github) Sound.play('panel');
   const desc = p.description.join('').length;
-  if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.type(0.25);
-  if (crel === BUILD.ready + 20) Sound.hiss(0.12, 0.4);   // the room settles once the panel is built
+  if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.play('type');
 }
-// launch: almost silent on purpose; the hiss drops out at the cut and a faint drone carries the log
+// launch: the room tone drops out at the cut, a drone carries the log, then the screen switches off
 function launchSfx(rel) {
-  if (rel === SEQ.cut) Sound.cut();
+  if (rel === SEQ.cut) { Sound.play('cut'); Sound.stop('room'); }
   const k = rel - SEQ.type;
-  if (k === 0) Sound.droneStart(SEQ.typeFrames / FPS);
-  if (k === 40) Sound.hum(1, 0.3);                        // the hum comes back under the log
-  if (k === SEQ.typeFrames + 1) Sound.droneStop();
+  if (k === 0) Sound.start('drone');
+  if (k === SEQ.typeFrames + 1) { Sound.stop('drone'); Sound.play('off'); }
   const d = k - SEQ.typeFrames - 1 - SEQ.afterglow - SEQ.black;
-  if (d === 0) Sound.hiss(0.12, 0.3);
-  if (d === DETAIL.title || d === DETAIL.title + 6) Sound.panelBip(0.6);
-  if (d === DETAIL.sub) Sound.panelBip(0.4);
-  if (d === DETAIL.button.dim[0]) Sound.panelBip(0.4, 1460);
-  if (d === DETAIL.button.on) Sound.panelBip(0.7);
+  if (d === 0) Sound.start('room');
+  if (d === DETAIL.title || d === DETAIL.title + 6 || d === DETAIL.sub) Sound.play('panel');
+  if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('panel');
 }
 function sfxAt(n) {
-  if (n === muteShown) Sound.panelBip(0.5);
+  if (n === muteShown) Sound.play('panel');
   if (launch) launchSfx(n - launch.start);
   else if (selection) selectionSfx(n - selection.start);
   else bootSfx(n);
@@ -819,7 +810,7 @@ function targetAt(e) {
 function toggleMute() {
   Sound.setMuted(!Sound.muted);
   startDecode(frameNow);
-  Sound.panelBip(0.6);   // only heard when the sound comes back on
+  Sound.play('toggle');   // only heard when the sound comes back on
 }
 canvas.addEventListener('pointerdown', e => {
   Sound.init();
@@ -844,7 +835,7 @@ canvas.addEventListener('pointermove', e => {
   const target = targetAt(e);
   const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
   const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
-  if ((nextHover !== null && nextHover !== hover) || (nextId !== null && nextId !== hoverId)) Sound.tick(3200, 0.25);
+  if ((nextHover !== null && nextHover !== hover) || (nextId !== null && nextId !== hoverId)) Sound.play('hover');
   if (nextId === 'mute' && hoverId !== 'mute') startDecode(frameNow);
   hover = nextHover; hoverId = nextId;
   canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
@@ -867,7 +858,7 @@ addEventListener('keydown', e => {
       const cur = hover ?? 7, col = cur % 5, row = Math.floor(cur / 5);
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       hover = Math.min(2, Math.max(0, row + d[1])) * 5 + Math.min(4, Math.max(0, col + d[0]));
-      Sound.tick(3200, 0.25);
+      Sound.play('hover');
       e.preventDefault();
     }
     if (k === 'enter' && hover !== null) startSelection(hover, frameNow);
@@ -896,7 +887,7 @@ function loop(now) {
 window.__portfolio = () => ({
   frame: frameNow, bootDone: bootDone(frameNow), panelReady: !!panelReady(frameNow),
   launch: launch ? launchState(frameNow - launch.start).phase : null, homeReady: homeReady(frameNow),
-  muted: Sound.muted, soundsPlayed: Sound.played, muteVisible: muteVisible(frameNow),
+  muted: Sound.muted, muteVisible: muteVisible(frameNow),
   selectionStart: selection ? selection.start : null, launchStart: launch ? launch.start : null,
 });
 

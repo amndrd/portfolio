@@ -48,5 +48,5 @@ await click(540, 330);
 await until(() => window.__portfolio().panelReady);
 await page.keyboard.press('Escape');                          // Esc from the panel
 const esc = await state();
-console.log(JSON.stringify({ mutedOnce, unmuted, soundsPlayed: esc.soundsPlayed, afterHome: back, afterEsc: esc, errors }));
+console.log(JSON.stringify({ mutedOnce, unmuted, afterHome: back, afterEsc: esc, errors }));
 await browser.close();

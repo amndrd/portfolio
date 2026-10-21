@@ -2,7 +2,7 @@
 
 A portfolio site styled as an old CRT terminal: worn white-on-black interface, phosphor grain, and a frame-timed animation for every step. Projects sit in a 3 × 5 grid of pictograms. Pick one and a crosshair flies to it, the cell flips and moves to the top-left, and a project panel builds itself around a live ASCII view of the project. LAUNCH plays a boot log before the detail page.
 
-Everything is drawn on a single canvas and filtered through a WebGL CRT pass. The sounds are synthesized live with Web Audio, with no audio files.
+Everything is drawn on a single canvas and filtered through a WebGL CRT pass. The site is silent for now: recorded sounds are being chosen and will be wired to the cue names in `site/js/sound.js`.
 
 ![Grid](docs/screenshots/grid.png)
 ![Project panel](docs/screenshots/panel.png)
@@ -49,7 +49,7 @@ site/                  the website
   js/grid.js           grid geometry, cell frames, pictogram drawing
   js/pictos.js         placeholder pictograms (drawn in code)
   js/projects.js       project entries: edit this file to add content
-  js/sound.js          synthesized sound effects and room tone
+  js/sound.js          sound cues and mute state (silent until the recorded sounds are wired)
 prototypes/            the step-by-step design explorations that led to the site
 tools/                 Playwright scripts: screenshots, frame sequences, end-to-end test, audio recording
 ```
