@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 04 · Grid boot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script>
+// Prototype 04 — grid boot sequence, timed frame by frame on the reference (60 fps).
+// Keys: R replay, S slow motion (×0.25), I invert, H toggles this label.
+// URL params: ?inv=0|1&hud=0|1&seed=N&freeze=1 (freeze: frames are driven by window.__setFrame)
+
+const FPS = 60;
+const BOOT_START = 27;   // frames of empty screen before the first cell
+const BOOT_STEP = 4;     // one cell every 4 frames (15 Hz)
+
+// What one cell shows, frame by frame after it is triggered.
+// 'framed' = frame added on top of the corner brackets; 'fade' steps use FADE below.
+const CELL_BOOT = [
+  [0, 'brackets'], [2, 'off'], [5, 'brackets'], [28, 'off'],
+  [32, 'framed'], [36, 'frame'], [37, 'fade'], [41, 'done'],
+];
+// pictogram opacity / grain on the fade frames (37..40), measured on the reference
+const FADE = [[0.36, 0.55], [0.67, 0.3], [0.9, 0], [0.95, 0]];
+function cellState(rel) {
+  let state = 'hidden', from = 0;
+  for (const [f, s] of CELL_BOOT) if (rel >= f) { state = s; from = f; }
+  return { state, step: rel - from };
+}
+
+const params = new URLSearchParams(location.search);
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const freeze = params.get('freeze') === '1';
+
+function shuffled(n, seed) {
+  let s = seed;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const a = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+let order, triggerAt;
+function newOrder() {
+  const seed = Number(params.get('seed')) || 1 + Math.floor(Math.random() * 1e6);
+  order = shuffled(GRID.length, seed);
+  triggerAt = new Array(GRID.length);
+  order.forEach((cell, k) => { triggerAt[cell] = BOOT_START + k * BOOT_STEP; });
+}
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+let dpr, layout;
+
+function drawUI(f) {
+  const w = innerWidth, h = innerHeight;
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.fillStyle = OFF; ui.fillRect(0, 0, w, h);
+  const { C, t, cellX, cellY } = layout;
+
+  GRID.forEach((name, k) => {
+    const x = cellX(k % 5), y = cellY(Math.floor(k / 5));
+    const { state, step } = cellState(f - triggerAt[k]);
+    ui.save();
+    ui.globalAlpha = DIM.has(name) ? 0.38 : 1;
+    switch (state) {
+      case 'brackets': drawBootBrackets(ui, x, y, C, t); break;
+      case 'framed': drawFrame(ui, x, y, C, t); drawBootBrackets(ui, x, y, C, t); break;
+      case 'frame': drawFrame(ui, x, y, C, t); break;
+      case 'fade': {
+        const [alpha, grain] = FADE[step];
+        drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C, { alpha, grain });
+        break;
+      }
+      case 'done': drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C); break;
+    }
+    ui.restore();
+  });
+}
+
+let lastDrawn = -1;
+function renderFrame(f) {
+  if (f !== lastDrawn) { drawUI(f); crt.upload(uiCanvas); lastDrawn = f; }
+  crt.render(f / FPS, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `frame ${String(f).padStart(3, '0')}${slow ? '  ×0.25' : ''}${inverted ? '  inverted' : ''}\nR  replay   S  slow motion   I  invert   H  hide`;
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+  crt.resize(W, H);
+  uiCanvas.width = W; uiCanvas.height = H;
+  layout = gridLayout(innerWidth, innerHeight);
+  lastDrawn = -1;
+}
+
+// real-time clock with slow motion; virtual time keeps advancing smoothly when toggled
+let slow = false, vt = 0, last = performance.now();
+function loop(now) {
+  vt += (now - last) / 1000 * (slow ? 0.25 : 1); last = now;
+  renderFrame(Math.floor(vt * FPS));
+  requestAnimationFrame(loop);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'r') { newOrder(); vt = 0; lastDrawn = -1; }
+  if (k === 's') slow = !slow;
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+});
+addEventListener('resize', resize);
+
+document.fonts.load('12px "Share Tech Mono"').finally(() => {
+  newOrder();
+  resize();
+  window.__setFrame = f => renderFrame(f);
+  if (!freeze) requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
