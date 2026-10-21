@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 07 · Panel layouts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script src="../shared/projects.js"></script>
+<script>
+// Prototype 07 — three layout directions for the project panel, final state only (no build animation yet).
+// Same header as prototype 06: selected cell + crosshair at the top-left, status label, title.
+// Keys: 1 / 2 / 3 layout, I invert, H label. URL params: ?v=a|b|c&inv=0|1&cell=N&hud=0|1
+
+const LAYOUTS = { a: 'A · Visual file', b: 'B · Instrument', c: 'C · Tabs' };
+const params = new URLSearchParams(location.search);
+let layoutKey = LAYOUTS[params.get('v')] ? params.get('v') : 'a';
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const CELL = Number(params.get('cell') ?? 8);
+
+// placeholder details, shared by every entry for now
+const DETAILS = {
+  stack: ['THREE.JS', 'GLSL', 'WEBGL'],
+  duration: '3 months', team: 4,
+  tags: ['WEB', '3D', 'CREATIVE CODING'],
+  lead: ['A real-time 3D index', 'of 400 objects for a', 'museum lab, built for', 'touch screens and the web.'],
+  body: ['Research, art direction and front-end.', 'Shipped in 3 months with a team of 4.'],
+  figures: [['FIG. 01', 'HOMEPAGE'], ['FIG. 02', 'OBJECT VIEW'], ['FIG. 03', 'MOBILE'], ['FIG. 04', 'COLLECTION']],
+};
+const SCENE_KINDS = ['hero', 'object', 'mobile', 'grid'];
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+let dpr, layout, capRatio = 0.6, w, h, u;
+
+// ---- design space: 1920×1080, scaled to the window -------------------------------
+const X = v => v / 1920 * w, Y = v => v / 1080 * h;
+function R(x, y, rw, rh, col = ON) { ui.fillStyle = col; ui.fillRect(X(x), Y(y), X(rw), Y(rh)); }
+function box(x, y, bw, bh, t, col = ON) {
+  ui.fillStyle = col;
+  const px = X(x), py = Y(y), pw = X(bw), ph = Y(bh);
+  ui.fillRect(px, py, pw, t); ui.fillRect(px, py + ph - t, pw, t);
+  ui.fillRect(px, py, t, ph); ui.fillRect(px + pw - t, py, t, ph);
+}
+function setFont(cap, weight = 700) { ui.font = `${weight} ${Math.round(cap * u / capRatio)}px "Handjet", monospace`; }
+function text(str, x, y, cap, { align = 'left', color = ON, weight = 700 } = {}) {
+  setFont(cap, weight); ui.textAlign = align; ui.textBaseline = 'alphabetic';
+  ui.fillStyle = color; ui.fillText(str, X(x), Y(y));
+}
+const textW = (str, cap, weight = 700) => { setFont(cap, weight); return ui.measureText(str).width / w * 1920; };
+function arrow(cx, cy, s, dir, col = ON) {
+  const x = X(cx), y = Y(cy), k = s * u;
+  ui.fillStyle = col; ui.beginPath();
+  ui.moveTo(x + dir * k * 0.5, y); ui.lineTo(x, y - k * 0.45); ui.lineTo(x, y - k * 0.18);
+  ui.lineTo(x - dir * k * 0.5, y - k * 0.18); ui.lineTo(x - dir * k * 0.5, y + k * 0.18);
+  ui.lineTo(x, y + k * 0.18); ui.lineTo(x, y + k * 0.45); ui.closePath(); ui.fill();
+}
+function corners(x, y, bw, bh, arm, t) {
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const px = x + sx * bw, py = y + sy * bh;
+    R(sx ? px - arm : px, sy ? py - t / u : py, arm, t / u);
+    R(sx ? px - t / u : px, sy ? py - arm : py, t / u, arm);
+  }
+}
+
+// ---- placeholder visuals: grayscale scenes, ordered-dithered to 1 bit ---------------
+const BAYER8 = [[0,32,8,40,2,34,10,42],[48,16,56,24,50,18,58,26],[12,44,4,36,14,46,6,38],[60,28,52,20,62,30,54,22],
+                [3,35,11,43,1,33,9,41],[51,19,59,27,49,17,57,25],[15,47,7,39,13,45,5,37],[63,31,55,23,61,29,53,21]];
+const gray = v => { const c = Math.round(Math.max(0, Math.min(1, v)) * 255); return `rgb(${c},${c},${c})`; };
+function seeded(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+function sphere(g, x, y, r) {
+  const grad = g.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.05, x, y, r);
+  grad.addColorStop(0, gray(1)); grad.addColorStop(0.45, gray(0.62)); grad.addColorStop(1, gray(0.1));
+  g.fillStyle = grad; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+}
+function ridge(g, x, y, rw, rh, base, amp, lum, rnd) {
+  g.fillStyle = gray(lum); g.beginPath(); g.moveTo(x, y + rh);
+  for (let i = 0; i <= 12; i++) g.lineTo(x + rw * i / 12, y + rh * base - rh * amp * (0.35 + 0.65 * rnd()));
+  g.lineTo(x + rw, y + rh); g.closePath(); g.fill();
+}
+const SCENES = {
+  hero(g, sw, sh) {
+    const rnd = seeded(7);
+    g.fillStyle = gray(0.05); g.fillRect(0, 0, sw, sh);
+    g.fillStyle = gray(0.9); g.fillRect(sw * 0.04, sh * 0.05, sw * 0.1, sh * 0.05);
+    for (let i = 0; i < 4; i++) { g.fillStyle = gray(0.55); g.fillRect(sw * (0.6 + i * 0.09), sh * 0.065, sw * 0.06, sh * 0.025); }
+    const hx = sw * 0.04, hy = sh * 0.16, hw = sw * 0.92, hh = sh * 0.62;
+    const sky = g.createLinearGradient(0, hy, 0, hy + hh);
+    sky.addColorStop(0, gray(0.1)); sky.addColorStop(1, gray(0.6));
+    g.save(); g.beginPath(); g.rect(hx, hy, hw, hh); g.clip();
+    g.fillStyle = sky; g.fillRect(hx, hy, hw, hh);
+    g.fillStyle = gray(0.97); g.beginPath(); g.arc(hx + hw * 0.72, hy + hh * 0.42, hh * 0.15, 0, Math.PI * 2); g.fill();
+    ridge(g, hx, hy, hw, hh, 0.75, 0.35, 0.36, rnd);
+    ridge(g, hx, hy, hw, hh, 0.88, 0.3, 0.2, rnd);
+    ridge(g, hx, hy, hw, hh, 1.0, 0.22, 0.07, rnd);
+    g.restore();
+    g.fillStyle = gray(0.96); g.fillRect(hx + hw * 0.05, hy + hh * 0.18, hw * 0.36, hh * 0.1); g.fillRect(hx + hw * 0.05, hy + hh * 0.32, hw * 0.26, hh * 0.1);
+    g.fillStyle = gray(0.7); g.fillRect(hx + hw * 0.05, hy + hh * 0.5, hw * 0.22, hh * 0.04);
+    g.strokeStyle = gray(0.95); g.lineWidth = Math.max(1, sh * 0.012); g.strokeRect(hx + hw * 0.05, hy + hh * 0.62, hw * 0.14, hh * 0.1);
+    for (let i = 0; i < 3; i++) { g.fillStyle = gray(0.5); g.fillRect(sw * 0.04 + i * sw * 0.31, sh * 0.84, sw * 0.26, sh * 0.03); g.fillRect(sw * 0.04 + i * sw * 0.31, sh * 0.9, sw * 0.18, sh * 0.03); }
+  },
+  object(g, sw, sh) {
+    const bg = g.createLinearGradient(0, 0, 0, sh);
+    bg.addColorStop(0, gray(0.02)); bg.addColorStop(0.7, gray(0.22)); bg.addColorStop(1, gray(0.08));
+    g.fillStyle = bg; g.fillRect(0, 0, sw, sh);
+    const ped = g.createLinearGradient(sw * 0.38, 0, sw * 0.62, 0);
+    ped.addColorStop(0, gray(0.15)); ped.addColorStop(0.4, gray(0.55)); ped.addColorStop(1, gray(0.12));
+    g.fillStyle = ped; g.fillRect(sw * 0.38, sh * 0.68, sw * 0.24, sh * 0.32);
+    g.fillStyle = gray(0.75); g.fillRect(sw * 0.36, sh * 0.66, sw * 0.28, sh * 0.03);
+    sphere(g, sw * 0.5, sh * 0.42, sh * 0.24);
+    g.fillStyle = gray(0.8);
+    g.fillRect(sw * 0.06, sh * 0.1, sw * 0.16, sh * 0.03); g.fillRect(sw * 0.06, sh * 0.16, sw * 0.1, sh * 0.03);
+  },
+  mobile(g, sw, sh) {
+    g.fillStyle = gray(0.12); g.fillRect(0, 0, sw, sh);
+    for (let i = 0; i < 3; i++) {
+      const pw = sw * 0.2, ph = sh * 0.84, px = sw * (0.14 + i * 0.26), py = sh * (0.08 + (i === 1 ? -0.03 : 0.03));
+      g.fillStyle = gray(0.85); g.beginPath(); g.roundRect(px, py, pw, ph, pw * 0.14); g.fill();
+      g.fillStyle = gray(0.03); g.fillRect(px + pw * 0.08, py + ph * 0.07, pw * 0.84, ph * 0.84);
+      const im = g.createLinearGradient(0, py, 0, py + ph * 0.4);
+      im.addColorStop(0, gray(0.25 + i * 0.15)); im.addColorStop(1, gray(0.7));
+      g.fillStyle = im; g.fillRect(px + pw * 0.14, py + ph * 0.12, pw * 0.72, ph * 0.34);
+      for (let k = 0; k < 4; k++) { g.fillStyle = gray(0.6); g.fillRect(px + pw * 0.14, py + ph * (0.52 + k * 0.08), pw * (k % 2 ? 0.5 : 0.72), ph * 0.035); }
+    }
+  },
+  grid(g, sw, sh) {
+    g.fillStyle = gray(0.04); g.fillRect(0, 0, sw, sh);
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 3; i++) {
+      const cw = sw * 0.28, ch = sh * 0.4, cx = sw * (0.05 + i * 0.31), cy = sh * (0.07 + j * 0.47);
+      const bg = g.createLinearGradient(cx, cy, cx, cy + ch);
+      bg.addColorStop(0, gray(0.18)); bg.addColorStop(1, gray(0.4));
+      g.fillStyle = bg; g.fillRect(cx, cy, cw, ch);
+      if ((i + j) % 2) sphere(g, cx + cw / 2, cy + ch * 0.5, ch * 0.3);
+      else {
+        const gr = g.createLinearGradient(cx, cy, cx + cw, cy);
+        gr.addColorStop(0, gray(0.95)); gr.addColorStop(1, gray(0.25));
+        g.fillStyle = gr; g.fillRect(cx + cw * 0.32, cy + ch * 0.2, cw * 0.36, ch * 0.6);
+      }
+    }
+  },
+};
+function dithered(kind, iw, ih) {
+  const c = document.createElement('canvas'); c.width = iw; c.height = ih;
+  const g = c.getContext('2d');
+  SCENES[kind](g, iw, ih);
+  const d = g.getImageData(0, 0, iw, ih);
+  for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
+    const i = (y * iw + x) * 4;
+    const v = d.data[i] / 255 > (BAYER8[y & 7][x & 7] + 0.5) / 64 ? 255 : 0;
+    d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255;
+  }
+  g.putImageData(d, 0, 0);
+  return c;
+}
+function visual(kind, x, y, vw, vh, px) {
+  const img = dithered(kind, Math.round(X(vw) / px), Math.round(Y(vh) / px));
+  ui.save(); ui.imageSmoothingEnabled = false; ui.drawImage(img, X(x), Y(y), X(vw), Y(vh)); ui.restore();
+}
+
+// ---- header: final state of prototype 06 ---------------------------------------------
+function drawHeader() {
+  const { C } = layout, t = layout.t;
+  const cx = X(270), cy = Y(206), L = C * 0.068, K = C * 0.05;
+  ui.fillStyle = OFF; ui.fillRect(w * 0.027 - K, cy - L / 2 - K, w * 0.946 + 2 * K, L + 2 * K); ui.fillRect(cx - L / 2 - K, h * 0.015 - K, L + 2 * K, h * 0.97 + 2 * K);
+  ui.fillStyle = ON; ui.fillRect(w * 0.027, cy - L / 2, w * 0.946, L); ui.fillRect(cx - L / 2, h * 0.015, L, h * 0.97);
+  const x = cx - C / 2, y = cy - C / 2, S = C * 0.865;
+  ui.fillStyle = OFF; ui.fillRect(x, y, C, C);
+  ui.fillStyle = ON; ui.fillRect(x + (C - S) / 2, y + (C - S) / 2, S, S);
+  drawPictoInverted(ui, GRID[CELL], x, y, C, 1, 0.865);
+  const bt = C * 0.07, arm = C * 0.35, off = C * 0.15, bs = C + off * 2, bx = cx - bs / 2, by = cy - bs / 2;
+  ui.fillStyle = ON;
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const px = bx + sx * bs, py = by + sy * bs;
+    ui.fillRect(sx ? px - arm : px, sy ? py - bt : py, arm, bt);
+    ui.fillRect(sx ? px - bt : px, sy ? py - arm : py, bt, arm);
+  }
+  const lx = cx + C / 2 + off + C * 0.1;
+  ui.font = `700 ${Math.round(C * 0.15)}px "Handjet", monospace`; ui.textAlign = 'left'; ui.textBaseline = 'alphabetic';
+  ui.fillText(`Archive entry ${String(CELL + 1).padStart(2, '0')} located. Opening file ...`, lx, cy - 0.64 * C);
+  setFont(0.3 * 180.48); ui.fillText(`ENTRY ${String(CELL + 1).padStart(2, '0')}: ${PROJECTS[CELL].title}`, lx, cy - 0.2 * C);
+}
+
+// ---- A · Visual file: big visual + thumbnails on the left, spec sheet on the right ----
+// The area under the reticle (x < 420, y < 340) stays free, as in the reference panel.
+function layoutA(p, st, thin) {
+  const fx = 300, fy = 345, fw = 850, fh = 445;
+  R(420, 250, 150, 44); text('FIG. 01', 440, 284, 22, { color: OFF });
+  text('HOMEPAGE  -  HERO SECTION', 594, 284, 20);
+  text('01 / 04', fx + fw, 284, 20, { align: 'right' });
+  for (let x = 420; x <= fx + fw; x += 16) R(x, 308, 6, 22);
+  box(fx, fy, fw, fh, st);
+  visual('hero', fx + 18, fy + 18, fw - 36, fh - 36, 3 * u);
+  const tw = (fw - 3 * 22) / 4, ty = 812, th = 100;
+  SCENE_KINDS.forEach((k, i) => {
+    const tx = fx + i * (tw + 22);
+    box(tx, ty, tw, th, i === 0 ? st : thin);
+    visual(k, tx + 12, ty + 12, tw - 24, th - 24, 2 * u);
+  });
+  R(fx, ty + th + 9, tw, 8);
+  // archive index: jump to the previous / next entry without going back to the grid
+  box(fx, 973, 62, 52, thin); arrow(fx + 31, 999, 34, -1);
+  for (let i = 0; i < 15; i++) {
+    const sx = fx + 88 + i * 44;
+    if (i === CELL) R(sx, 983, 30, 32); else box(sx, 983, 30, 32, thin * 0.7);
+  }
+  box(fx + fw - 62, 973, 62, 52, thin); arrow(fx + fw - 31, 999, 34, 1);
+
+  const rx = 1200, rr = 1860;
+  R(rx, 245, 230, 52); text('SPECS', rx + 22, 284, 28, { color: OFF });
+  R(rx + 230, 289, rr - rx - 230, thin / u);
+  const rows = [['ROLE', p.role], ['CLIENT', p.client], ['YEAR', String(p.year)], ['DURATION', DETAILS.duration], ['STACK', DETAILS.stack.slice(0, 2).join(' / ')]];
+  rows.forEach(([k, v], i) => {
+    const y = 372 + i * 62;
+    text(k, rx, y, 18);
+    text(v, rr, y, 22, { align: 'right' });
+    const a = rx + textW(k, 18) + 18, b = rr - textW(v, 22) - 18;
+    for (let x = a; x < b - 4; x += 14) R(x, y - 6, 5, 5);
+  });
+  let cx = rx;
+  for (const tag of DETAILS.tags) {
+    const tw2 = textW(tag, 16) + 32;
+    box(cx, 664, tw2, 46, thin * 0.8); text(tag, cx + 16, 697, 16);
+    cx += tw2 + 14;
+  }
+  DETAILS.body.concat(['Touch screens, kiosk and web.']).forEach((line, i) => text(line, rx, 780 + i * 40, 17, { weight: 600 }));
+  box(rx, 905, 300, 125, thin); text('VISIT SITE', rx + 150, 980, 20, { align: 'center' });
+  box(1530, 905, 330, 125, st); text('LAUNCH', 1695, 995, 36, { align: 'center' });
+}
+
+// ---- B · Instrument: data column, visual in a viewfinder, timeline of every entry -----
+function layoutB(p, st, thin) {
+  const blocks = [['ROLE', p.role.toUpperCase()], ['CLIENT', p.client.toUpperCase()], ['YEAR', String(p.year)], ['DURATION', DETAILS.duration.toUpperCase()]];
+  blocks.forEach(([k, v], i) => {
+    const y0 = 345 + i * 105;
+    text(k, 300, y0 + 26, 15, { weight: 600 });
+    text(v, 300, y0 + 72, 26);
+    R(300, y0 + 90, 340, thin / u);
+  });
+  text('STACK', 300, 800, 15, { weight: 600 });
+  DETAILS.stack.forEach((s, i) => { R(300, 823 + i * 38, 14, 14); text(s, 330, 838 + i * 38, 19); });
+  box(300, 950, 340, 75, thin); text('VISIT SITE', 470, 999, 20, { align: 'center' });
+
+  const vx = 720, vy = 280, vw = 880, vh = 490;
+  visual('hero', vx, vy, vw, vh, 3 * u);
+  corners(vx - 20, vy - 20, vw + 40, vh + 40, 80, st);
+  for (let i = 0; i <= 40; i++) {
+    const x = vx + i * vw / 40, big = i % 10 === 0, mid = i % 5 === 0;
+    R(x - 2, 232, 4, big ? 18 : mid ? 12 : 7);
+  }
+  for (let i = 0; i <= 22; i++) {
+    const y = vy + i * vh / 22, big = i % 11 === 0;
+    R(668, y - 2, big ? 18 : 9, 4);
+  }
+  text('FIG. 01  -  HOMEPAGE', vx - 20, 838, 19);
+  text('880 x 490    1 : 1', vx + vw + 20, 838, 19, { align: 'right' });
+  SCENE_KINDS.forEach((k, i) => {
+    const ty = 260 + i * 139;
+    box(1660, ty, 200, 112, i === 0 ? st : thin);
+    visual(k, 1672, ty + 12, 176, 88, 2 * u);
+  });
+
+  // timeline: one square per entry, stacked by year; the open entry is filled + marked
+  const t0 = 720, t1 = 1480, ty = 985;
+  text('TIMELINE', t0, 880, 15, { weight: 600 });
+  R(t0, ty, t1 - t0, thin / u); R(t0, ty - 14, thin / u, 30); R(t1 - thin / u, ty - 14, thin / u, 30);
+  const span = YEAR_RANGE[1] - YEAR_RANGE[0], stack = {};
+  for (let yr = YEAR_RANGE[0]; yr <= YEAR_RANGE[1]; yr++) text(String(yr), t0 + 30 + (yr - YEAR_RANGE[0]) / span * (t1 - t0 - 60), ty + 42, 14, { align: 'center', weight: 600 });
+  PROJECTS.forEach((q, i) => {
+    const n = stack[q.year] = (stack[q.year] || 0) + 1;
+    const x = t0 + 30 + (q.year - YEAR_RANGE[0]) / span * (t1 - t0 - 60) - 8, y = ty - 12 - n * 22;
+    if (i === CELL) {
+      R(x, y, 16, 16);
+      ui.fillStyle = ON; ui.beginPath(); ui.moveTo(X(x - 6), Y(y - 30)); ui.lineTo(X(x + 22), Y(y - 30)); ui.lineTo(X(x + 8), Y(y - 10)); ui.closePath(); ui.fill();
+    } else box(x, y, 16, 16, thin * 0.55);
+  });
+  box(1560, 890, 300, 140, st); text('LAUNCH', 1710, 985, 36, { align: 'center' });
+}
+
+// ---- C · Tabs: folder tabs under the title, editorial text + key figures -----------------
+function layoutC(p, st, thin) {
+  ['OVERVIEW', 'GALLERY', 'CREDITS', 'LINKS'].forEach((t, i) => {
+    const x = 420 + i * 254;
+    if (i === 0) { R(x, 228, 240, 60); text(t, x + 120, 272, 24, { align: 'center', color: OFF }); }
+    else { box(x, 228, 240, 60, thin); text(t, x + 120, 272, 24, { align: 'center' }); }
+  });
+  R(420, 284, 1440, st / u); R(1860 - st / u, 284, st / u, 746); R(285, 1030 - st / u, 1575, st / u);
+
+  DETAILS.lead.forEach((line, i) => text(line, 330, 400 + i * 84, 40));
+  DETAILS.body.forEach((line, i) => text(line, 330, 760 + i * 42, 19, { weight: 600 }));
+  R(1200, 330, thin / u, 530);
+  [['YEAR', String(p.year)], ['MONTHS', '03'], ['TEAM', String(DETAILS.team).padStart(2, '0')]].forEach(([k, v], i) => {
+    const y0 = 320 + i * 185;
+    text(k, 1250, y0 + 30, 16, { weight: 600 });
+    text(v, 1250, y0 + 148, 92);
+    if (i < 2) R(1250, y0 + 172, 570, thin / u);
+  });
+
+  R(285, 905, 1575, thin / u);
+  box(320, 935, 160, 70, thin); arrow(355, 970, 30, -1); text('PREV', 380, 982, 20);
+  text(`ENTRY ${String(CELL + 1).padStart(2, '0')} / ${PROJECTS.length}`, 640, 984, 24, { align: 'center' });
+  box(800, 935, 160, 70, thin); text('NEXT', 822, 982, 20); arrow(925, 970, 30, 1);
+  box(1250, 930, 250, 80, thin); text('VISIT SITE', 1375, 983, 20, { align: 'center' });
+  R(1530, 930, 300, 80); text('LAUNCH', 1660, 986, 30, { align: 'center', color: OFF }); arrow(1772, 970, 34, 1, OFF);
+}
+
+function drawUI() {
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.fillStyle = OFF; ui.fillRect(0, 0, w, h);
+  drawHeader();
+  const st = layout.C * 0.05, thin = layout.C * 0.036;
+  ({ a: layoutA, b: layoutB, c: layoutC })[layoutKey](PROJECTS[CELL], st, thin);
+  crt.upload(uiCanvas);
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  w = innerWidth; h = innerHeight;
+  crt.resize(Math.round(w * dpr), Math.round(h * dpr));
+  uiCanvas.width = Math.round(w * dpr); uiCanvas.height = Math.round(h * dpr);
+  layout = gridLayout(w, h);
+  u = layout.C / 180.48;
+  drawUI();
+}
+
+function loop(now) {
+  crt.render(now / 1000, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `${LAYOUTS[layoutKey]}${inverted ? '  ·  inverted' : ''}\n1 / 2 / 3  layout   I  invert   H  hide`;
+  requestAnimationFrame(loop);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === '1' || k === '2' || k === '3') { layoutKey = 'abc'[Number(k) - 1]; drawUI(); }
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+});
+addEventListener('resize', resize);
+
+Promise.all([document.fonts.load('700 40px "Handjet"'), document.fonts.load('600 40px "Handjet"'), document.fonts.load('12px "Share Tech Mono"')]).finally(() => {
+  ui.font = '700 100px "Handjet"';
+  capRatio = ui.measureText('E').actualBoundingBoxAscent / 100 || 0.6;
+  resize();
+  requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
