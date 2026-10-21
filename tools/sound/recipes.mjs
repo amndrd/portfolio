@@ -75,4 +75,18 @@ export const cues = {
     const s = d.mix([[hit, 0], [accents, 0.01, -5], [attack, 0, -6], [thump(0.95), 0, -2]]);
     return [d.lowshelf(d.highpass(s, 30), 100, 4)];
   } },
+  // the other cells vanish one per frame: one click per frame, falling in pitch and level, over a glitch bed
+  vanish: { build() {
+    const clicks = [[0.090, 0.130], [0.120, 0.150], [0.200, 0.232], [0.232, 0.262], [0.262, 0.290]].map(([a, b]) => clean(cut('Scroll_Clicks', a, b), 0.5, 200));
+    const parts = Array.from({ length: 14 }, (_, i) => [d.pitch(clicks[i % clicks.length], 3 - i * 0.5), i / 60, -i * 0.9]);
+    const bed = d.fade(d.highpass(cut('loading_bleeps', 0.15, 0.45), 400), 0.01, 0.15);
+    return [d.mix([...parts, [bed, 0, -12]])];
+  } },
+  // the cell sliding to the top-left (0.68 s, eased): a tonal whoosh tightened to the move, over a low rumble
+  // (the droplet's 140 Hz sub, slowed) that swells and settles with it
+  move: { build() {
+    const s = d.slice(src('Energy_Portal', { af: 'atempo=2.2' }), 0.04, 0.80);
+    const rumble = d.lowpass(d.varispeed(cut('Incoming_Droplet', 0.15, 0.60), 0.8), 300);
+    return [d.fade(d.mix([[d.highpass(s, 140), 0], [d.fade(rumble, 0.25, 0.3), 0.02, -5]]), 0.04, 0.18)];
+  } },
 };

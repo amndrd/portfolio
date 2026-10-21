@@ -16,6 +16,8 @@ const Sound = (() => {
     select: { gain: -10 },
     travel: { gain: -12 },
     lock: { gain: -4 },
+    vanish: { gain: -13 },
+    move: { gain: -13 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};
