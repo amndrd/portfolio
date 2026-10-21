@@ -89,4 +89,29 @@ export const cues = {
     const rumble = d.lowpass(d.varispeed(cut('Incoming_Droplet', 0.15, 0.60), 0.8), 300);
     return [d.fade(d.mix([[d.highpass(s, 140), 0], [d.fade(rumble, 0.25, 0.3), 0.02, -5]]), 0.04, 0.18)];
   } },
+
+  // ---- panel --------------------------------------------------------------------------------------------
+  // one character typed: a tiny high beep (4-6 kHz), six of them so a line never repeats
+  type: { build() {
+    const beeps = [[0.232, 0.272, 1], [0.300, 0.345, 1], [1.414, 1.458, 1], [3.840, 3.885, 0.4], [4.978, 5.020, 0.45], [2.666, 2.706, 0.45]];
+    return beeps.map(([a, b, rate]) => clean(d.varispeed(cut('single_beeps', a, b), rate), 0.6, 1200));
+  } },
+  // the rulers drawing (28 frames): 17 regular ticks lasting exactly as long as the rulers
+  tick: { build: () => [d.fade(d.lowpass(d.highpass(cut('loading_bleeps', 1.440, 1.930), 250), 9000), 0.002, 0.03)] },
+  // an element lighting up: a distorted analog beep brought down to 1.94 kHz, as on the reference
+  panel: { build() {
+    const beeps = [cut('Distorted Rhythmic', 0.072, 0.320), cut('Distorted Rhythmic', 0.860, 1.100)].map(s => d.varispeed(s, 0.9));
+    const flutter = d.varispeed(cut('Alert_High_Beep', 0.095, 0.340), 0.56);
+    return [...beeps, flutter].map(s => d.highpass(d.fade(s, 0.002, 0.09), 200));
+  } },
+  // a row of the lists: a short grainy flicker (445 / 900 Hz)
+  row: { build: () => [cut('Flickering_Signal', 0.40, 0.52), cut('Flickering_Signal', 0.72, 0.84)].map(s => d.highpass(d.fade(s, 0.004, 0.05), 150)) },
+  // a button appearing (LAUNCH, GITHUB, HOME): the two-step retro select bleep
+  button: { build: () => [d.highpass(d.fade(cut('Select_Retro_Bleep', 0.030, 0.480), 0.001, 0.2), 150)] },
+  // the ASCII view scanning in (0.2 s): a rising run of blips over rising arcs
+  scan: { build() {
+    const run = d.slice(src('Techy_Glide', { af: 'atempo=1.6' }), 0.50, 0.71);
+    const arcs = d.reverse(cut('loading_bleeps', 0.92, 1.07));
+    return [d.fade(d.highpass(d.mix([[run, 0], [arcs, 0.03, -6]]), 300), 0.005, 0.06)];
+  } },
 };

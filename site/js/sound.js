@@ -15,9 +15,15 @@ const Sound = (() => {
     hover: { gain: -16, detune: 120, voices: 1 },
     select: { gain: -10 },
     travel: { gain: -12 },
+    type: { gain: -27, detune: 150, voices: 2 },
     lock: { gain: -4 },
     vanish: { gain: -13 },
     move: { gain: -13 },
+    tick: { gain: -23 },
+    panel: { gain: -20, detune: 40, voices: 3 },
+    row: { gain: -18, voices: 2 },
+    button: { gain: -19 },
+    scan: { gain: -19 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};

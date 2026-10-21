@@ -723,17 +723,21 @@ function selectionSfx(rel) {
   if (crel === 0) Sound.play('lock');
   if (crel === XH.vanishDelay) Sound.play('vanish');   // the other cells vanish, one per frame
   if (crel === MOVE.start) Sound.play('move');
-  if (typed(crel, TITLE.start, TITLE.rate, p.title.length + 10)) Sound.play('type');
+  if (typed(crel, TITLE.start, TITLE.rate, p.title.length + 10) && crel % 2 === 0) Sound.play('type');
   // panel build
-  if (crel >= BUILD.ruler[0] && crel < BUILD.ruler[1] && crel % 2 === 0) Sound.play('tick');
-  if (crel === BUILD.tab[0][0]) Sound.play('panel');
+  if (crel === BUILD.ruler[0]) Sound.play('tick');   // one tick per ruler mark, as long as the rulers take
+  if (crel === BUILD.tab[0][0]) { Sound.play('panel'); Sound.play('thump'); }
+  if (crel === BUILD.back[2][0]) Sound.play('thump', { gain: -2 });   // BACK fully lit
   if (crel === BUILD.ascii[0]) Sound.play('scan');
   for (const at of [BUILD.block1, BUILD.block2, BUILD.bar[0]]) if (crel === at || crel === at + 6) Sound.play('panel');
-  if (BUILD.rows.includes(crel)) Sound.play('panel');
-  if (crel === BUILD.launch.dim[0] || crel === BUILD.launch.on) Sound.play('panel');
-  if (crel === BUILD.github) Sound.play('panel');
+  if (crel === BUILD.block1 || crel === BUILD.block2) Sound.play('thump', { gain: -4 });
+  const row = BUILD.rows.indexOf(crel);
+  if (row >= 0) Sound.play('row', { rate: 2 ** (row / 12) });   // a semitone up per row
+  if (crel === BUILD.launch.dim[0] || crel === BUILD.launch.on) Sound.play('button');
+  if (crel === BUILD.launch.on) Sound.play('thump');
+  if (crel === BUILD.github) Sound.play('button', { gain: -4 });
   const desc = p.description.join('').length;
-  if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.play('type');
+  if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.play('type', { gain: -5 });
 }
 // launch: the room tone drops out at the cut, a drone carries the log, then the screen switches off
 function launchSfx(rel) {
@@ -747,7 +751,7 @@ function launchSfx(rel) {
   if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('panel');
 }
 function sfxAt(n) {
-  if (n === muteShown) Sound.play('panel');
+  if (n === muteShown) Sound.play('panel', { gain: -4 });
   if (launch) launchSfx(n - launch.start);
   else if (selection) selectionSfx(n - selection.start);
   else bootSfx(n);
