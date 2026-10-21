@@ -897,7 +897,7 @@ function loop(now) {
 window.__portfolio = () => ({
   frame: frameNow, bootDone: bootDone(frameNow), panelReady: !!panelReady(frameNow),
   launch: launch ? launchState(frameNow - launch.start).phase : null, homeReady: homeReady(frameNow),
-  muted: Sound.muted, muteVisible: muteVisible(frameNow),
+  muted: Sound.muted, soundsPlayed: Sound.played, muteVisible: muteVisible(frameNow),
   selectionStart: selection ? selection.start : null, launchStart: launch ? launch.start : null,
 });
 

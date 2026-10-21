@@ -34,7 +34,7 @@ const Sound = (() => {
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};
-  let muted = false;
+  let muted = false, played = 0;
   try { muted = localStorage.getItem('portfolio.muted') === '1'; } catch {}
   const db = v => 10 ** (v / 20);
 
@@ -100,6 +100,7 @@ const Sound = (() => {
     init,
     ready,
     get muted() { return muted; },
+    get played() { return played; },   // sounds started, for the automated checks
     setMuted(v) {
       muted = v;
       try { localStorage.setItem('portfolio.muted', v ? '1' : '0'); } catch {}
@@ -115,7 +116,7 @@ const Sound = (() => {
       last[name] = k;
       const rate = (opts.rate || 1) * 2 ** ((Math.random() * 2 - 1) * (m.detune || 0) / 1200);
       const v = source(list[k], rate, db((m.gain || 0) + (opts.gain || 0)), sfx);
-      v.s.start();
+      v.s.start(); played++;
       const active = (playing[name] ||= []);
       active.push(v);
       v.s.onended = () => { const i = active.indexOf(v); if (i >= 0) active.splice(i, 1); };
@@ -129,7 +130,7 @@ const Sound = (() => {
       if (info.loop) { v.s.loop = true; [v.s.loopStart, v.s.loopEnd] = info.loop; }
       v.s.start(now(), info.loop ? info.loop[0] : 0);
       v.g.gain.linearRampToValueAtTime(db(m.gain || 0), now() + (m.fadeIn || 0.01));
-      playing[name] = [v];
+      playing[name] = [v]; played++;
     },
     stop(name) {
       for (const v of playing[name] || []) fadeOut(v, MIX[name]?.fadeOut || 0.05);
