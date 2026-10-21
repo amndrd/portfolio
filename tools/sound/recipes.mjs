@@ -56,4 +56,23 @@ export const cues = {
   // ---- pointer ---------------------------------------------------------------------------------------
   // a short chatter of bright scroll clicks (about 0.28 s), in the spirit of the igloo.inc hover
   hover: { build: () => [d.highpass(d.fade(cut('Scroll_Clicks', 0.085, 0.370), 0.001, 0.04), 300)] },
+
+  // ---- selection ----------------------------------------------------------------------------------------
+  // the crosshair coming in: a soft low bloop (586 Hz) with its little hit
+  select: { build: () => [d.fade(d.highpass(cut('Incoming_Droplet', 0.60, 1.00), 120), 0.003, 0.18)] },
+  // the crosshair travelling to the cell (0.52 s): a targeting buzz, the tonal lines forming
+  travel: { build() {
+    const buzz = d.slice(src('Game_-_Cybernetic_Scan', { af: 'atempo=1.8' }), 0.06, 0.60);
+    const lines = d.slice(src('Device_Scan', { af: 'atempo=1.7' }), 0.30, 0.84);
+    return [d.fade(d.mix([[d.highpass(buzz, 70), 0], [d.highpass(lines, 1500), 0, -8]]), 0.06, 0.14)];
+  } },
+  // the click on the cell: retro bleep attack, a sub hit with a held chord, the lock-on accents of the scan,
+  // and the thump with its low end lifted, for the reference's big low burst
+  lock: { build() {
+    const hit = d.fade(cut('Alien_Technology', 8.15, 9.25), 0.002, 0.45);
+    const accents = d.fade(cut('Game_-_Cybernetic_Scan', 1.25, 1.75), 0.002, 0.2);
+    const attack = d.fade(cut('Select_Retro_Bleep', 0.035, 0.10), 0.001, 0.03);
+    const s = d.mix([[hit, 0], [accents, 0.01, -5], [attack, 0, -6], [thump(0.95), 0, -2]]);
+    return [d.lowshelf(d.highpass(s, 30), 100, 4)];
+  } },
 };
