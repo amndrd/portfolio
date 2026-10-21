@@ -8,6 +8,7 @@
 const Sound = (() => {
   // level in dB, random detune in cents, voices that may overlap (the oldest is cut), fades in s
   const MIX = {
+    room: { gain: -11, fadeIn: 2.5 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};

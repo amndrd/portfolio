@@ -26,4 +26,13 @@ function thump(drop = 1) {
 }
 
 export const cues = {
+  // ---- ambience ------------------------------------------------------------------------------------
+  // a dark drone bed, looped from the steady part of the ambient track, its risers kept down and its top
+  // rolled off: like the reference's room tone, it lives under 2 kHz
+  room: { loop: true, xfade: 4, bitrate: '112k', build() {
+    let s = cut('background-on', 3.0, 118.5, { channels: 2 });
+    s = d.envelope(s, [[0, 0], [2.0, 0], [3.5, -6], [6.5, -6], [8.0, 0], [51, 0], [52.5, -6], [55.5, -6], [57, 0]]);
+    s = d.lowpass(d.highshelf(d.lowshelf(d.highpass(s, 32), 110, 2), 2000, -6), 6000);
+    return [s];
+  } },
 };

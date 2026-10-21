@@ -169,6 +169,7 @@ function startSelection(cell, f) {
   hover = null; hoverId = null;
   resetCam();
   Sound.play('select');
+  Sound.ambience(-1, 2500, 1.5);   // the room darkens while a project is open
 }
 function startLaunch(f) {
   // draw the current (complete) panel off-screen to collect every text, bottom line first
@@ -183,7 +184,7 @@ function startLaunch(f) {
 function goHome(f) {
   selection = null; launch = null; hover = null; hoverId = null;
   resetBoot(f);
-  Sound.start('room');
+  Sound.ambience(0, 18000, 1);
   Sound.play('back');
 }
 
@@ -733,12 +734,12 @@ function selectionSfx(rel) {
 }
 // launch: the room tone drops out at the cut, a drone carries the log, then the screen switches off
 function launchSfx(rel) {
-  if (rel === SEQ.cut) { Sound.play('cut'); Sound.stop('room'); }
+  if (rel === SEQ.cut) { Sound.play('cut'); Sound.ambience(-12, 350, 0.04); }
   const k = rel - SEQ.type;
   if (k === 0) Sound.start('drone');
   if (k === SEQ.typeFrames + 1) { Sound.stop('drone'); Sound.play('off'); }
   const d = k - SEQ.typeFrames - 1 - SEQ.afterglow - SEQ.black;
-  if (d === 0) Sound.start('room');
+  if (d === 0) Sound.ambience(-1, 2500, 1.5);
   if (d === DETAIL.title || d === DETAIL.title + 6 || d === DETAIL.sub) Sound.play('panel');
   if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('panel');
 }
