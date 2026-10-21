@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 06 · Project panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  body.hover canvas { cursor: pointer; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script src="../shared/projects.js"></script>
+<script>
+// Prototype 06 — full selection sequence: boot, crosshair, click, move to the top-left, panel build.
+// Every timing is measured on the reference at 60 fps; frame numbers in comments are relative to the click.
+// Mouse: click a cell, page arrows. Keys: arrows + Enter, Esc back to grid, R replay boot,
+// S slow motion, I invert, H label.
+// URL params: ?inv=0|1&hud=0|1&seed=N&boot=0|1&freeze=1&auto=<cell>@<frame>
+
+const FPS = 60;
+
+// ---- boot ------------------------------------------------------------------------
+const BOOT_START = 27, BOOT_STEP = 4;
+const CELL_BOOT = [[0, 'brackets'], [2, 'off'], [5, 'brackets'], [28, 'off'], [32, 'framed'], [36, 'frame'], [37, 'fade'], [41, 'done']];
+const FADE = [[0.36, 0.55], [0.67, 0.3], [0.9, 0], [0.95, 0]];
+function cellState(rel) {
+  let state = 'hidden', from = 0;
+  for (const [f, s] of CELL_BOOT) if (rel >= f) { state = s; from = f; }
+  return { state, step: rel - from };
+}
+
+// ---- crosshair, frames after the selection starts -------------------------------
+const XH = {
+  fadeFrames: 14, moveStart: 9, moveFrames: 31,
+  click: 60,
+  vanishDelay: 2,
+  labelStart: 9, labelRate: 0.8,
+  start: [0.845, 0.313],
+  line: 0.068, knock: 0.05, bracket: 0.07, bracketArm: 0.35, bracketOffset: 0.15, label: 0.15,
+};
+
+// ---- click (frames after the click) ------------------------------------------------
+const ROT = [9.9, 9.8, 9.3, 9.2, 8.7, 8.2, 7.4, 6.7, 5.9, 5.1, 4.2, 3.3, 2.3, 1.6, 0.8, 0, 0,
+             -0.9, -1.5, -2.1, -2.6, -3.1, -3.4, -3.6, -3.7, -3.7, -3.7, -3.6, -3.4,
+             -3.2, -3.0, -2.8, -2.3, -2.1, -1.9, -1.5, -1.2, -0.9, -0.8, 0];   // straightens during the move
+const RETICLE_ZOOM = [1.094, 1.085, 1.064, 1.047, 1.021, 1.009];
+const CLICK_FILL = [0.15, 0.48, 0.88];
+const CLICK_CELL = [1.02, 1.015, 1.0];
+const CLICK_ICON = [1.045, 1.045, 1.025];
+const CLICK_SQUARE = [0.975, 0.95, 0.875, 0.865];
+const CLICK_DARK = [0, 0.25, 0.64, 0.98];
+
+// ---- move to the top-left + panel (frames after the click) -------------------------
+const MOVE = { start: 28, frames: 41, to: [270 / 1920, 206 / 1080] };
+// status label lifts above the title while the title types in under it
+const LABEL_LIFT = [[37, 0.22], [39, 0.44], [45, 0.57], [51, 0.64]];        // baseline above the line, × cell
+const TITLE = { start: 39, rate: 2.7, cap: 0.3, baseline: 0.2,
+                look: [[39, 0.35, 0.72], [43, 0.4, 0.8], [45, 0.8, 0.86], [47, 1, 0.92], [51, 1, 1]] };  // [frame, alpha, scale]
+const PANEL = {
+  content:     { fade: [[69, 0.15], [72, 0.5], [77, 1]] },
+  ruler:       { grow: [68, 96] },
+  boxTitle:    { fade: [[73, 0.15], [75, 0.5], [77, 1]], top: [73, 90], bottom: [73, 78] },
+  separator:   { grow: [75, 98] },
+  bottomLine:  { grow: [72, 96] },
+  bottomEdge:  { grow: [79, 88] },
+  arrowBoxes:  { fade: [[74, 0.15], [94, 0.5], [98, 1]] },
+  arrowIcons:  { fade: [[85, 0.15], [111, 0.5], [120, 1]] },
+  pageText:    { fade: [[103, 0.15], [104, 0.5], [106, 1]] },
+  gauges:      { blink: [128, 131, 134] },          // on 3 frames, off 3, then on
+  bigButton:   { dim: [146, 149], on: 152 },        // dim 3 frames, off 3, then on
+  rows:        [151, 159, 167],                     // checkbox filled on the first frame only
+  smallButton: 175,
+  progress:    { first: 2, next: 192, every: 40, fade: 10, total: 24 },
+  marker:      { drift: 181, speed: 0.375 / 1920 },  // slow live drift, fraction of the width per frame
+};
+
+function bezier(x1, y1, x2, y2) {
+  return t => {
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 30; i++) {
+      const s = (lo + hi) / 2;
+      const x = 3 * (1 - s) ** 2 * s * x1 + 3 * (1 - s) * s * s * x2 + s ** 3;
+      if (x < t) lo = s; else hi = s;
+    }
+    const s = (lo + hi) / 2;
+    return 3 * (1 - s) ** 2 * s * y1 + 3 * (1 - s) * s * s * y2 + s ** 3;
+  };
+}
+const travel = bezier(0.40, 0.15, 0.40, 0.95);     // crosshair to the cell
+const moveEase = bezier(0.60, 0.00, 0.40, 0.95);   // cell + crosshair to the top-left
+
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const grow = (rel, [a, b]) => clamp01((rel - a) / (b - a));
+function steps(rel, keys) { let v = 0; for (const [f, a] of keys) if (rel >= f) v = a; return v; }
+function interp(rel, keys) {
+  if (rel <= keys[0][0]) return keys[0].slice(1);
+  for (let i = 1; i < keys.length; i++) {
+    if (rel <= keys[i][0]) {
+      const [f0, ...a] = keys[i - 1], [f1, ...b] = keys[i], t = (rel - f0) / (f1 - f0);
+      return a.map((v, k) => v + (b[k] - v) * t);
+    }
+  }
+  return keys[keys.length - 1].slice(1);
+}
+
+const params = new URLSearchParams(location.search);
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const freeze = params.get('freeze') === '1';
+const auto = params.get('auto') ? params.get('auto').split('@').map(Number) : null;
+
+function shuffled(n, seed) {
+  let s = seed;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const a = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+let dpr, layout, capRatio = 0.6;
+
+let triggerAt, bootOffset = 0;
+let selection = null;      // { cell, start, from, to, page }
+let hover = null;
+let frameNow = 0;
+let hits = [];             // clickable panel areas for this frame
+
+function resetBoot(f, play) {
+  const seed = Number(params.get('seed')) || 1 + Math.floor(Math.random() * 1e6);
+  const order = shuffled(GRID.length, seed);
+  triggerAt = new Array(GRID.length);
+  order.forEach((cell, k) => { triggerAt[cell] = BOOT_START + k * BOOT_STEP; });
+  bootOffset = play ? f : -1e6;
+  selection = null;
+}
+const bootDone = f => f - bootOffset >= BOOT_START + (GRID.length - 1) * BOOT_STEP + 41;
+function cellBox(k) { return [layout.cellX(k % 5), layout.cellY(Math.floor(k / 5))]; }
+
+function startSelection(cell, f) {
+  const { C } = layout, w = innerWidth, h = innerHeight;
+  const [x, y] = cellBox(cell);
+  const to = [x + C / 2, y + C / 2];
+  let from = [XH.start[0] * w, XH.start[1] * h];
+  if (Math.hypot(from[0] - to[0], from[1] - to[1]) < w * 0.16) from = [(1 - XH.start[0]) * w, XH.start[1] * h];
+  selection = { cell, start: f, from, to, page: 0 };
+  hover = null; document.body.classList.remove('hover');
+}
+
+// ---- drawing helpers ---------------------------------------------------------------
+function rect(r, pad = 0) { ui.fillRect(r[0] - pad, r[1] - pad, r[2] + 2 * pad, r[3] + 2 * pad); }
+function outline(x, y, w, h, t) { ui.fillRect(x, y, w, t); ui.fillRect(x, y + h - t, w, t); ui.fillRect(x, y, t, h); ui.fillRect(x + w - t, y, t, h); }
+function font(cap, weight = 700) { return `${weight} ${Math.round(cap / capRatio)}px "Handjet", monospace`; }
+function text(str, x, y, cap, { align = 'left', alpha = 1, weight = 700 } = {}) {
+  if (alpha <= 0) return;
+  ui.save(); ui.globalAlpha *= alpha;
+  ui.font = font(cap, weight); ui.textAlign = align; ui.textBaseline = 'alphabetic';
+  ui.fillStyle = ON; ui.fillText(str, x, y);
+  ui.restore();
+}
+
+function drawCellAt(k, f) {
+  const { C, t } = layout, [x, y] = cellBox(k), name = GRID[k];
+  const { state, step } = cellState(f - bootOffset - triggerAt[k]);
+  switch (state) {
+    case 'brackets': drawBootBrackets(ui, x, y, C, t); break;
+    case 'framed': drawFrame(ui, x, y, C, t); drawBootBrackets(ui, x, y, C, t); break;
+    case 'frame': drawFrame(ui, x, y, C, t); break;
+    case 'fade': drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C, { alpha: FADE[step][0], grain: FADE[step][1] }); break;
+    case 'done': drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C); break;
+  }
+}
+
+// Targeted cell, centred on (cx, cy), opaque. rel = frames after the click.
+function drawSelectedCell(k, rel, cx, cy) {
+  const { C, t } = layout, x = cx - C / 2, y = cy - C / 2, name = GRID[k];
+  ui.fillStyle = OFF; ui.fillRect(x, y, C, C);
+  if (rel < 0) { drawFrame(ui, x, y, C, t); drawPicto(ui, name, x, y, C); return; }
+  if (rel < CLICK_FILL.length) {
+    const s = CLICK_CELL[rel], Cs = C * s, ts = t * s, o = (C - Cs) / 2;
+    ui.fillStyle = OFF; ui.fillRect(x + o, y + o, Cs, Cs);
+    drawFrame(ui, x + o, y + o, Cs, ts);
+    drawPicto(ui, name, x, y, C, { scale: CLICK_ICON[rel] });
+    ui.save(); ui.globalAlpha = CLICK_FILL[rel]; ui.fillStyle = ON;
+    ui.fillRect(x + o + ts, y + o + ts, Cs - 2 * ts, Cs - 2 * ts);
+    ui.restore();
+    return;
+  }
+  const i = rel - CLICK_FILL.length;
+  const sq = CLICK_SQUARE[Math.min(i, CLICK_SQUARE.length - 1)], S = C * sq, o = (C - S) / 2;
+  ui.fillStyle = ON; ui.fillRect(x + o, y + o, S, S);
+  const dark = i < CLICK_DARK.length ? CLICK_DARK[i] : 1;
+  if (dark > 0) drawPictoInverted(ui, name, x, y, C, dark, sq);
+}
+
+function reticleRects(cx, cy) {
+  const { C } = layout;
+  const bt = C * XH.bracket, arm = C * XH.bracketArm, off = C * XH.bracketOffset;
+  const bs = C + off * 2, bx = cx - bs / 2, by = cy - bs / 2;
+  return [[0, 0], [1, 0], [0, 1], [1, 1]].flatMap(([sx, sy]) => {
+    const px = bx + sx * bs, py = by + sy * bs;
+    return [[sx ? px - arm : px, sy ? py - bt : py, arm, bt], [sx ? px - bt : px, sy ? py - arm : py, bt, arm]];
+  });
+}
+
+function arrowIcon(cx, cy, s, dir) {
+  ui.beginPath();
+  ui.moveTo(cx + dir * s * 0.5, cy);
+  ui.lineTo(cx, cy - s * 0.45); ui.lineTo(cx, cy - s * 0.18);
+  ui.lineTo(cx - dir * s * 0.5, cy - s * 0.18); ui.lineTo(cx - dir * s * 0.5, cy + s * 0.18);
+  ui.lineTo(cx, cy + s * 0.18); ui.lineTo(cx, cy + s * 0.45);
+  ui.closePath(); ui.fill();
+}
+
+// ---- panel -------------------------------------------------------------------------
+// Geometry measured on the finished reference panel (1920×1080), stroke widths in cell units.
+function drawPanel(rel, vx, hy) {
+  const w = innerWidth, h = innerHeight, { C } = layout;
+  const X = v => v / 1920 * w, Y = v => v / 1080 * h;
+  const st = C * 0.05, thin = C * 0.036;
+  const p = PROJECTS[selection.cell];
+  hits = [];
+  ui.fillStyle = ON;
+
+  // left box: ruler, title box, content, bottom bar
+  const g = grow(rel, PANEL.ruler.grow);
+  if (g > 0) {
+    const x0 = X(420), x1 = X(1020), pitch = C * 0.08, tw = C * 0.04;
+    for (let x = x0; x <= x0 + (x1 - x0) * g; x += pitch) ui.fillRect(x, Y(225), tw, C * 0.14);
+  }
+  const bt = steps(rel, PANEL.boxTitle.fade);
+  if (bt > 0) {
+    ui.save(); ui.globalAlpha = bt;
+    ui.fillRect(X(420), Y(262), st, Y(380) - Y(262));            // title box sides
+    ui.fillRect(X(1020) - st, Y(262), st, Y(380) - Y(262));
+    ui.restore();
+    text('OVERVIEW', X(445), Y(352), C * 0.34, { alpha: bt });
+  }
+  const tt = grow(rel, PANEL.boxTitle.top);
+  if (tt > 0) ui.fillRect(X(420), Y(262), (X(1020) - X(420)) * tt, st);
+  const tb = grow(rel, PANEL.boxTitle.bottom);
+  if (tb > 0) ui.fillRect(X(285), Y(380) - st, (X(1020) - X(285)) * tb, st);
+
+  const ca = steps(rel, PANEL.content.fade);
+  if (ca > 0) {
+    PAGES[selection.page].forEach((line, i) => {
+      const y = Y(460) + i * C * 0.42;
+      ui.save(); ui.globalAlpha = ca; ui.fillRect(X(305), y - C * 0.17, C * 0.12, C * 0.12); ui.restore();
+      text(line, X(305) + C * 0.25, y, C * 0.17, { alpha: ca });
+    });
+  }
+
+  const sp = grow(rel, PANEL.separator.grow);
+  if (sp > 0) ui.fillRect(X(1030) - st / 2, hy, st, (Y(1020) - hy) * sp);
+  const bl = grow(rel, PANEL.bottomLine.grow);
+  if (bl > 0) ui.fillRect(X(285), Y(918), (X(1030) - X(285)) * bl, st);
+  const be = grow(rel, PANEL.bottomEdge.grow);
+  if (be > 0) ui.fillRect(vx, Y(1020) - st, (X(1030) + st / 2 - vx) * be, st);
+
+  const ab = steps(rel, PANEL.arrowBoxes.fade), ai = steps(rel, PANEL.arrowIcons.fade);
+  const arrows = [[X(840), -1], [X(930), 1]];
+  for (const [ax, dir] of arrows) {
+    const aw = X(930) - X(840), ah = Y(1020) - Y(935);
+    if (ab > 0) { ui.save(); ui.globalAlpha = ab; outline(ax, Y(935), aw, ah, st); ui.restore(); }
+    if (ai > 0) { ui.save(); ui.globalAlpha = ai; arrowIcon(ax + aw / 2, Y(935) + ah / 2, aw * 0.6, dir); ui.restore(); }
+    if (ai >= 1) hits.push({ x: ax, y: Y(935), w: aw, h: ah, action: dir < 0 ? 'prev' : 'next' });
+  }
+  text(`Page ${selection.page + 1}/${PAGES.length}`, X(300), Y(985), C * 0.18, { alpha: steps(rel, PANEL.pageText.fade) });
+
+  // right column: gauges, launch button, info rows, website button
+  const [b0, b1, b2] = PANEL.gauges.blink;
+  if ((rel >= b0 && rel < b1) || rel >= b2) {
+    // timeline: project year on the YEAR_RANGE scale, with a slow live drift
+    const lx0 = X(1075), lx1 = X(1750);
+    const yearPos = (p.year - YEAR_RANGE[0]) / (YEAR_RANGE[1] - YEAR_RANGE[0]);
+    const drift = rel > PANEL.marker.drift ? (rel - PANEL.marker.drift) * PANEL.marker.speed * w : 0;
+    const mx = Math.min(lx1, lx0 + (lx1 - lx0) * (0.07 + 0.86 * yearPos) + drift);
+    ui.fillRect(lx0, Y(905) - thin / 2, lx1 - lx0, thin);
+    ui.fillRect(lx0, Y(880), thin, Y(930) - Y(880));
+    ui.fillRect(lx1 - thin, Y(880), thin, Y(930) - Y(880));
+    ui.fillRect(mx - thin / 2, Y(893), thin, Y(925) - Y(893));
+    ui.beginPath(); ui.moveTo(mx - C * 0.15, Y(838)); ui.lineTo(mx + C * 0.15, Y(838)); ui.lineTo(mx, Y(868)); ui.closePath(); ui.fill();
+    // progress box: segments light up one by one
+    outline(X(1075), Y(945), X(1750) - X(1075), Y(1020) - Y(945), thin);
+    const pr = PANEL.progress, segW = C * 0.11, segP = C * 0.145;
+    for (let i = 0; i < pr.total; i++) {
+      let a = i < pr.first ? 1 : grow(rel, [pr.next + (i - pr.first) * pr.every, pr.next + (i - pr.first) * pr.every + pr.fade]);
+      if (a <= 0) break;
+      ui.save(); ui.globalAlpha = a; ui.fillRect(X(1090) + i * segP, Y(975), segW, Y(1010) - Y(975)); ui.restore();
+    }
+  }
+  const bb = PANEL.bigButton;
+  const big = rel >= bb.on ? 1 : (rel >= bb.dim[0] && rel < bb.dim[1] ? 0.35 : 0);
+  if (big > 0) {
+    ui.save(); ui.globalAlpha = big; outline(X(1070), Y(612), X(1757) - X(1070), Y(772) - Y(612), st); ui.restore();
+    text('LAUNCH', (X(1070) + X(1757)) / 2, (Y(612) + Y(772)) / 2 + C * 0.18, C * 0.36, { align: 'center', alpha: big });
+    if (big >= 1) hits.push({ x: X(1070), y: Y(612), w: X(1757) - X(1070), h: Y(772) - Y(612), action: 'launch' });
+  }
+  const rows = [['ROLE', p.role], ['YEAR', String(p.year)], ['CLIENT', p.client]];
+  PANEL.rows.forEach((at, i) => {
+    if (rel < at) return;
+    const cy = Y(280) + i * (Y(365) - Y(280)), bs = C * 0.28;
+    if (rel === at) ui.fillRect(X(1070), cy - bs / 2, bs, bs);
+    else outline(X(1070), cy - bs / 2, bs, bs, C * 0.04);
+    text(`${i + 1}.`, X(1175), cy + C * 0.125, C * 0.25);
+    text(rows[i][0], X(1250), cy + C * 0.125, C * 0.25);
+    text(rows[i][1], X(1430), cy + C * 0.125, C * 0.25);
+  });
+  if (rel >= PANEL.smallButton) {
+    outline(X(1070), Y(505), X(1757) - X(1070), Y(572) - Y(505), thin);
+    text('VISIT WEBSITE', (X(1070) + X(1757)) / 2, (Y(505) + Y(572)) / 2 + C * 0.09, C * 0.18, { align: 'center' });
+    hits.push({ x: X(1070), y: Y(505), w: X(1757) - X(1070), h: Y(572) - Y(505), action: 'website' });
+  }
+}
+
+// ---- frame -------------------------------------------------------------------------
+function drawUI(f) {
+  const w = innerWidth, h = innerHeight, { C } = layout;
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.globalCompositeOperation = 'source-over'; ui.globalAlpha = 1;
+  ui.fillStyle = OFF; ui.fillRect(0, 0, w, h);
+  hits = [];
+
+  const rel = selection ? f - selection.start : -1;
+  const crel = rel - XH.click;
+  const clicked = selection && crel >= 0;
+
+  let order = 0;
+  GRID.forEach((name, k) => {
+    if (selection && k === selection.cell) return;
+    if (selection) {
+      const gone = clicked && crel >= XH.vanishDelay + order;
+      order++;
+      if (gone) return;
+    }
+    drawCellAt(k, f);
+    if (!selection && hover === k && bootDone(f)) { const [x, y] = cellBox(k); drawBootBrackets(ui, x, y, C, layout.t); }
+  });
+  if (!selection) return;
+
+  // crosshair: travel to the cell, then (after the click) carry the cell to the top-left
+  const p = rel < XH.moveStart ? 0 : travel(Math.min(1, (rel - XH.moveStart) / XH.moveFrames));
+  let cx = selection.from[0] + (selection.to[0] - selection.from[0]) * p;
+  let cy = selection.from[1] + (selection.to[1] - selection.from[1]) * p;
+  const m = crel < MOVE.start ? 0 : moveEase(Math.min(1, (crel - MOVE.start) / MOVE.frames));
+  cx += (MOVE.to[0] * w - selection.to[0]) * m;
+  cy += (MOVE.to[1] * h - selection.to[1]) * m;
+  // the cell stays in its grid slot until the move, then travels with the crosshair
+  const scx = selection.to[0] + (MOVE.to[0] * w - selection.to[0]) * m;
+  const scy = selection.to[1] + (MOVE.to[1] * h - selection.to[1]) * m;
+
+  const alpha = Math.min(1, 0.1 + 0.9 * rel / XH.fadeFrames);
+  const L = C * XH.line, K = C * XH.knock;
+  const lines = [[w * 0.027, cy - L / 2, w * 0.946, L], [cx - L / 2, h * 0.015, L, h * 0.97]];
+  const angle = crel >= 0 ? ROT[Math.min(ROT.length - 1, crel)] * Math.PI / 180 : 0;
+  const zoom = crel >= 0 && crel < RETICLE_ZOOM.length ? RETICLE_ZOOM[crel] : 1;
+
+  ui.save(); ui.globalAlpha = alpha;
+  ui.fillStyle = OFF; for (const r of lines) rect(r, K);
+  ui.fillStyle = ON; for (const r of lines) rect(r);
+  ui.restore();
+
+  ui.save();
+  ui.translate(scx, scy); ui.rotate(angle); ui.translate(-scx, -scy);
+  drawSelectedCell(selection.cell, crel, scx, scy);
+  ui.restore();
+
+  ui.save(); ui.globalAlpha = alpha; ui.fillStyle = ON;
+  ui.translate(cx, cy); ui.rotate(angle); ui.scale(zoom, zoom); ui.translate(-cx, -cy);
+  for (const r of reticleRects(cx, cy)) rect(r);
+  ui.restore();
+
+  // status label (typed since the crosshair entered), lifted above the title
+  const lx = cx + C / 2 + C * XH.bracketOffset + C * 0.1;
+  if (rel >= XH.labelStart) {
+    const label = `Archive entry ${String(selection.cell + 1).padStart(2, '0')} located. Opening file ...`;
+    const n = Math.min(label.length, Math.floor((rel - XH.labelStart) * XH.labelRate) + 1);
+    const lift = crel < LABEL_LIFT[0][0] ? (L / 2 + K) / C + 0.08 : interp(crel, LABEL_LIFT)[0];
+    const ly = cy - lift * C;
+    ui.save(); ui.globalAlpha = alpha;
+    ui.font = `700 ${Math.round(C * XH.label)}px "Handjet", monospace`;
+    ui.textBaseline = 'alphabetic'; ui.lineJoin = 'round';
+    ui.lineWidth = K * 1.6; ui.strokeStyle = OFF; ui.strokeText(label.slice(0, n), lx, ly);
+    ui.fillStyle = ON; ui.fillText(label.slice(0, n), lx, ly);
+    ui.restore();
+  }
+
+  // project title, typed fast under the label, fading and growing in
+  if (crel >= TITLE.start) {
+    const title = `ENTRY ${String(selection.cell + 1).padStart(2, '0')}: ${PROJECTS[selection.cell].title}`;
+    const n = Math.min(title.length, Math.floor((crel - TITLE.start) * TITLE.rate) + 1);
+    const [ta, ts] = interp(crel, TITLE.look);
+    const ty = cy - TITLE.baseline * C;
+    ui.save(); ui.globalAlpha = ta;
+    ui.translate(lx, ty); ui.scale(ts, ts);
+    ui.font = font(TITLE.cap * C); ui.textBaseline = 'alphabetic'; ui.fillStyle = ON;
+    ui.fillText(title.slice(0, n), 0, 0);
+    ui.restore();
+  }
+
+  if (crel >= 0) drawPanel(crel, cx, cy);
+}
+
+function renderFrame(f) {
+  frameNow = f;
+  drawUI(f);
+  crt.upload(uiCanvas);
+  crt.render(f / FPS, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  const crel = selection ? f - selection.start - XH.click : null;
+  hud.textContent = `frame ${String(f).padStart(4, '0')}${crel !== null ? `  (click ${crel >= 0 ? '+' : ''}${crel})` : ''}${slow ? '  ×0.25' : ''}${inverted ? '  inverted' : ''}\n` +
+    `click a cell · arrows + Enter · page arrows · Esc back · R replay boot · S slow · I invert · H hide`;
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+  crt.resize(W, H);
+  uiCanvas.width = W; uiCanvas.height = H;
+  layout = gridLayout(innerWidth, innerHeight);
+  if (selection) {
+    const [x, y] = cellBox(selection.cell);
+    selection.to = [x + layout.C / 2, y + layout.C / 2];
+  }
+}
+
+// ---- input ---------------------------------------------------------------------------
+function cellAt(mx, my) {
+  const { C } = layout;
+  for (let k = 0; k < GRID.length; k++) {
+    const [x, y] = cellBox(k);
+    if (mx >= x && mx < x + C && my >= y && my < y + C) return k;
+  }
+  return null;
+}
+const hitAt = (mx, my) => hits.find(r => mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h);
+canvas.addEventListener('mousemove', e => {
+  if (selection) { document.body.classList.toggle('hover', !!hitAt(e.clientX, e.clientY)); return; }
+  if (!bootDone(frameNow)) return;
+  hover = cellAt(e.clientX, e.clientY);
+  document.body.classList.toggle('hover', hover !== null);
+});
+canvas.addEventListener('mouseleave', () => { hover = null; document.body.classList.remove('hover'); });
+canvas.addEventListener('click', e => {
+  if (selection) {
+    const hit = hitAt(e.clientX, e.clientY);
+    if (hit && (hit.action === 'prev' || hit.action === 'next')) selection.page = (selection.page + (hit.action === 'next' ? 1 : PAGES.length - 1)) % PAGES.length;
+    return;
+  }
+  if (!bootDone(frameNow)) return;
+  const k = cellAt(e.clientX, e.clientY);
+  if (k !== null) startSelection(k, frameNow);
+});
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'escape') { selection = null; document.body.classList.remove('hover'); }
+  if (k === 'r') resetBoot(frameNow, true);
+  if (k === 's') slow = !slow;
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+  if (!selection && bootDone(frameNow) && e.key.startsWith('Arrow')) {
+    const cur = hover ?? 7;
+    const col = cur % 5, row = Math.floor(cur / 5);
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    hover = Math.min(2, Math.max(0, row + d[1])) * 5 + Math.min(4, Math.max(0, col + d[0]));
+    e.preventDefault();
+  }
+  if (selection && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) selection.page = (selection.page + 1) % PAGES.length;
+  if (k === 'enter' && !selection && hover !== null && bootDone(frameNow)) startSelection(hover, frameNow);
+});
+addEventListener('resize', resize);
+
+let slow = false, vt = 0, last = performance.now();
+function loop(now) {
+  vt += (now - last) / 1000 * (slow ? 0.25 : 1); last = now;
+  renderFrame(Math.floor(vt * FPS));
+  requestAnimationFrame(loop);
+}
+
+Promise.all([document.fonts.load('700 40px "Handjet"'), document.fonts.load('12px "Share Tech Mono"')]).finally(() => {
+  // cap height of the UI font, so sizes can be given as cap heights like the measurements
+  ui.font = '700 100px "Handjet"';
+  capRatio = ui.measureText('E').actualBoundingBoxAscent / 100 || 0.6;
+  resize();
+  resetBoot(0, params.get('boot') !== '0');
+  window.__setFrame = f => {
+    if (auto && f >= auto[1] && !selection) startSelection(auto[0], auto[1]);
+    if (auto && f < auto[1]) selection = null;
+    renderFrame(f);
+  };
+  if (!freeze) requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
