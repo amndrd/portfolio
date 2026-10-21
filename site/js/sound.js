@@ -29,6 +29,8 @@ const Sound = (() => {
     cut: { gain: -14 },
     erase: { gain: -22 },
     off: { gain: -13 },
+    back: { gain: -10 },
+    toggle: { gain: -14 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};

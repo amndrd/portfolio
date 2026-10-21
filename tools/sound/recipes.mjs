@@ -143,4 +143,13 @@ export const cues = {
   } },
   // the screen switching off: the start-up buzz falling in pitch, gone in half a second
   off: { build: () => [d.lowpass(d.fade(d.slice(d.glide(cut('System_Start_Up', 0.4, 1.6), 1.0, 0.3, 0.55), 0, 0.7), 0.003, 0.3, 'fast'), 2000)] },
+
+  // ---- navigation ------------------------------------------------------------------------------------------
+  // BACK / HOME: the select bloop a step lower
+  back: { build: () => [d.fade(d.highpass(d.varispeed(cut('Incoming_Droplet', 0.60, 0.95), 0.8), 100), 0.003, 0.15)] },
+  // the sound coming back on: two tiny 8-bit beeps going up
+  toggle: { build() {
+    const b = d.fade(cut('Minimal Beep', 0.040, 0.075), 0.001, 0.01);
+    return [d.mix([[b, 0], [d.varispeed(b, 1.5), 0.07]])];
+  } },
 };
