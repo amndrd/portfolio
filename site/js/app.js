@@ -1,8 +1,8 @@
 // Portfolio: the whole flow on one canvas. Grid boot, crosshair selection, project panel,
 // launch sequence, detail page (placeholder). Timings measured on the reference at 60 fps;
 // the prototypes in ../prototypes hold the measurements and the alternatives.
-// Keys: arrows + Enter pick a cell, Esc goes back, I inverts the colours.
-// Needs pictos.js, grid.js, crt.js, projects.js.
+// Keys: arrows + Enter pick a cell, Esc goes back, I inverts the colours, M mutes.
+// Needs pictos.js, grid.js, crt.js, projects.js, sound.js.
 
 const FPS = 60;
 
@@ -63,6 +63,7 @@ const L = {
   band: [420, 1150], screen: [300, 345, 850, 585],
   back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
   home: [810, 640, 300, 90],
+  mute: [1736, 34, 148, 62],
 };
 
 // ---- easing + keyframe helpers ------------------------------------------------------------------
@@ -123,6 +124,7 @@ let hover = null;          // hovered grid cell
 let hoverId = null;        // hovered button
 let forceLaunch = null;    // LAUNCH lit state while it blinks
 let record = null;         // texts collected during the off-screen pass
+let muteShown = null;      // frame the sound button first appeared (end of the first boot)
 let frameNow = 0, nowT = 0;
 
 function shuffled(n) {
@@ -166,6 +168,7 @@ function startSelection(cell, f) {
   selection = { cell, start: f, from, to };
   hover = null; hoverId = null;
   resetCam();
+  Sound.beep();
 }
 function startLaunch(f) {
   // draw the current (complete) panel off-screen to collect every text, bottom line first
@@ -175,10 +178,12 @@ function startLaunch(f) {
   record = null; ctx = ui;
   launch = { start: f, cell: selection.cell, texts, log: bootLog(ENTRIES[selection.cell], entryId(selection.cell)) };
   hoverId = null;
+  Sound.confirm();
 }
 function goHome(f) {
   selection = null; launch = null; hover = null; hoverId = null;
   resetBoot(f);
+  Sound.back();
 }
 
 // ---- drawing helpers, in design coordinates --------------------------------------------------------
@@ -632,6 +637,98 @@ function drawDetail(d) {
   if (d >= b.on) text('OR PRESS ESC', 960, 772, 15, { align: 'center', weight: 600 });
 }
 
+// ---- sound button (top-right) -----------------------------------------------------------------------------
+// hidden from the cut of the launch sequence until the detail page
+function muteVisible(f) {
+  if (muteShown === null) return false;
+  if (launch && !['press', 'detail'].includes(launchState(f - launch.start).phase)) return false;
+  return blinkOn(f - muteShown, 0);
+}
+function speakerIcon(cx, cy, s, col, off) {
+  const k = s * u, x = X(cx), y = Y(cy);
+  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = k * 0.11; ctx.lineCap = 'butt';
+  ctx.fillRect(x - k * 0.5, y - k * 0.17, k * 0.24, k * 0.34);
+  ctx.beginPath(); ctx.moveTo(x - k * 0.28, y - k * 0.17); ctx.lineTo(x - k * 0.02, y - k * 0.44);
+  ctx.lineTo(x - k * 0.02, y + k * 0.44); ctx.lineTo(x - k * 0.28, y + k * 0.17); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  if (off) {
+    ctx.moveTo(x + k * 0.14, y - k * 0.2); ctx.lineTo(x + k * 0.52, y + k * 0.2);
+    ctx.moveTo(x + k * 0.52, y - k * 0.2); ctx.lineTo(x + k * 0.14, y + k * 0.2);
+  } else {
+    ctx.arc(x + k * 0.02, y, k * 0.22, -0.85, 0.85);
+    ctx.moveTo(x + k * 0.02 + k * 0.42 * Math.cos(-0.85), y + k * 0.42 * Math.sin(-0.85));
+    ctx.arc(x + k * 0.02, y, k * 0.42, -0.85, 0.85);
+  }
+  ctx.stroke();
+}
+function drawMute(f) {
+  if (!muteVisible(f)) return;
+  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05, lit = hoverId === 'mute';
+  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+  if (lit) R(x, y, bw, bh); else box(x, y, bw, bh, layout.C * 0.036);
+  const col = lit ? OFF : ON;
+  speakerIcon(x + 42, y + bh / 2, 36, col, Sound.muted);
+  text(Sound.muted ? 'OFF' : 'ON', x + 82, y + bh / 2 + 11, 22, { color: col });
+}
+
+// ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
+const LABEL_LEN = 'Archive entry 00 located. Opening file ...'.length;
+const typed = (rel, start, rate, len) => rel >= start && rel < start + len / rate;
+function bootSfx(n) {
+  const r = n - bootOffset;
+  for (let k = 0; k < GRID.length; k++) {
+    const rel = r - triggerAt[k];
+    if (rel === 0 || rel === 5) Sound.tick(1150 + Math.random() * 350, 0.5);
+    else if (rel === 2) Sound.tick(900, 0.2);
+    else if (rel === 32) Sound.tick(700, 0.4);
+    else if (rel === 37) Sound.blip(1880 + k * 12, 0.22, 0.03);
+  }
+}
+function selectionSfx(rel) {
+  const crel = rel - XH.click, p = ENTRIES[selection.cell];
+  if (rel === XH.moveStart) Sound.sweep(XH.moveFrames / FPS);
+  if (typed(rel, XH.labelStart, XH.labelRate, LABEL_LEN) && rel % 2 === 0) Sound.type(0.35);
+  if (crel === 0) Sound.click();
+  if (crel >= XH.vanishDelay && crel < XH.vanishDelay + GRID.length - 1) Sound.tick(900 + 110 * (crel - XH.vanishDelay), 0.35);
+  if (crel === MOVE.start) Sound.whoosh(MOVE.frames / FPS);
+  if (typed(crel, TITLE.start, TITLE.rate, p.title.length + 10)) Sound.type(0.5);
+  // panel build
+  if (crel >= BUILD.ruler[0] && crel < BUILD.ruler[1] && crel % 2 === 0) Sound.tick(1000 + (crel - BUILD.ruler[0]) * 35, 0.22);
+  if (crel === BUILD.tab[0][0]) Sound.blip(1940, 0.4);
+  if (crel === BUILD.ascii[0]) Sound.scan((BUILD.ascii[1] - BUILD.ascii[0]) / FPS);
+  for (const at of [BUILD.block1, BUILD.block2, BUILD.bar[0]]) if (crel === at || crel === at + 6) Sound.blip(1944, 0.45);
+  if (BUILD.rows.includes(crel)) Sound.blip(1944, 0.5);
+  if (crel === BUILD.launch.dim[0]) Sound.blip(980, 0.3);
+  if (crel === BUILD.launch.on) Sound.blip(1460, 0.5);
+  if (crel === BUILD.github) Sound.blip(1944, 0.4);
+  const desc = p.description.join('').length;
+  if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.type(0.3);
+}
+function launchSfx(rel) {
+  if (rel === 6) Sound.blip(990, 0.4);                                   // button lights again
+  if (rel === SEQ.cut) Sound.cut();
+  if (rel > SEQ.cut && rel < SEQ.cut + SEQ.erase) Sound.tick(3000 - (rel - SEQ.cut) * 150, 0.3);   // backspacing
+  const k = rel - SEQ.type;
+  if (k === 0) Sound.whineStart(SEQ.typeFrames / FPS);
+  if (k > 0 && k <= SEQ.typeFrames) {
+    const total = launch.log.reduce((n, l) => n + l.length, 0);
+    const shown = j => Math.floor(total * Math.min(1, j / SEQ.typeFrames) ** 1.15);
+    if (shown(k) > shown(k - 1)) Sound.type(0.35 + 0.35 * k / SEQ.typeFrames);
+  }
+  if (k === SEQ.typeFrames + 1) Sound.powerOff();
+  const d = k - SEQ.typeFrames - 1 - SEQ.afterglow - SEQ.black;
+  if (d === DETAIL.title || d === DETAIL.title + 6) Sound.blip(1944, 0.45);
+  if (d === DETAIL.sub) Sound.blip(1700, 0.3);
+  if (d === DETAIL.button.dim[0]) Sound.blip(980, 0.3);
+  if (d === DETAIL.button.on) Sound.blip(1460, 0.5);
+}
+function sfxAt(n) {
+  if (n === muteShown) Sound.blip(1940, 0.3);
+  if (launch) launchSfx(n - launch.start);
+  else if (selection) selectionSfx(n - selection.start);
+  else bootSfx(n);
+}
+
 // ---- frame -------------------------------------------------------------------------------------------------
 function drawScene(f) {
   ctx = ui;
@@ -647,6 +744,7 @@ function drawScene(f) {
     if (fx.phase === 'detail') drawDetail(fx.d);
   } else if (selection) drawSelection(f);
   else drawIndex(f);
+  drawMute(f);
   crt.upload(uiCanvas);
   crt.render(f / FPS, { inverted, lift: fx.lift || 0, blank: fx.blank || 0 });
 }
@@ -678,6 +776,7 @@ function cellAt(mx, my) {
 }
 function targetAt(e) {
   const px = e.clientX / w * 1920, py = e.clientY / h * 1080;
+  if (muteVisible(frameNow) && inRect(px, py, L.mute)) return 'mute';
   if (launch) return homeReady(frameNow) && inRect(px, py, L.home) ? 'home' : null;
   if (selection) {
     if (!panelReady(frameNow)) return null;
@@ -688,10 +787,16 @@ function targetAt(e) {
   const k = cellAt(e.clientX, e.clientY);
   return k === null ? null : `cell${k}`;
 }
+function toggleMute() {
+  Sound.setMuted(!Sound.muted);
+  Sound.blip(Sound.muted ? 980 : 1940, 0.5);   // only heard when the sound comes back on
+}
 canvas.addEventListener('pointerdown', e => {
+  Sound.init();
   lastInput = performance.now();
   const target = targetAt(e);
   if (!target) return;
+  if (target === 'mute') { toggleMute(); return; }
   if (target.startsWith('cell')) { startSelection(Number(target.slice(4)), frameNow); canvas.style.cursor = 'default'; return; }
   if (target === 'screen') { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; return; }
   if (target === 'back' || target === 'home') { goHome(frameNow); canvas.style.cursor = 'default'; return; }
@@ -707,8 +812,10 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   const target = targetAt(e);
-  hover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
-  hoverId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
+  const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
+  const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
+  if ((nextHover !== null && nextHover !== hover) || (nextId !== null && nextId !== hoverId)) Sound.tick(1500, 0.3);
+  hover = nextHover; hoverId = nextId;
   canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
 });
 addEventListener('pointerup', () => { if (drag) { drag = null; canvas.style.cursor = 'grab'; } });
@@ -719,14 +826,17 @@ canvas.addEventListener('wheel', e => {
   lastInput = performance.now(); e.preventDefault();
 }, { passive: false });
 addEventListener('keydown', e => {
+  Sound.init();
   const k = e.key.toLowerCase();
   if (k === 'i') setInverted(!inverted);
+  if (k === 'm') toggleMute();
   if (k === 'escape' && (launch ? homeReady(frameNow) : selection)) goHome(frameNow);
   if (!selection && !launch && bootDone(frameNow)) {
     if (e.key.startsWith('Arrow')) {
       const cur = hover ?? 7, col = cur % 5, row = Math.floor(cur / 5);
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       hover = Math.min(2, Math.max(0, row + d[1])) * 5 + Math.min(4, Math.max(0, col + d[0]));
+      Sound.tick(1500, 0.3);
       e.preventDefault();
     }
     if (k === 'enter' && hover !== null) startSelection(hover, frameNow);
@@ -738,7 +848,10 @@ addEventListener('resize', resize);
 let vt = 0, last = performance.now();
 function loop(now) {
   vt += Math.min(0.1, (now - last) / 1000); last = now;
+  const prev = frameNow;
   frameNow = Math.floor(vt * FPS); nowT = vt;
+  if (muteShown === null && bootDone(frameNow)) muteShown = frameNow;
+  for (let n = prev + 1; n <= frameNow; n++) sfxAt(n);
   if (panelReady(frameNow) && !drag) {
     cam.yaw += cam.vyaw; cam.pitch += cam.vpitch; cam.vyaw *= 0.94; cam.vpitch *= 0.9;
     if (now - lastInput > 2500) cam.yaw += 0.004;   // idle: slow turntable
@@ -752,6 +865,7 @@ function loop(now) {
 window.__portfolio = () => ({
   frame: frameNow, bootDone: bootDone(frameNow), panelReady: !!panelReady(frameNow),
   launch: launch ? launchState(frameNow - launch.start).phase : null, homeReady: homeReady(frameNow),
+  muted: Sound.muted, soundsPlayed: Sound.played, muteVisible: muteVisible(frameNow),
 });
 
 Promise.all([
