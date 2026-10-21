@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 09 · Project screen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=JetBrains+Mono:wght@800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #999; opacity: .6; pointer-events: none; white-space: pre;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script src="../shared/pictos.js"></script>
+<script src="../shared/grid.js"></script>
+<script src="../shared/crt.js"></script>
+<script>
+// Prototype 09 — SPLIT panel with a real example project. The ASCII screen shows four views of the project:
+// 01 MODEL (3D, drag to orbit), 02 TRAINING (live loss chart), 03 SAMPLE (text generated token by token),
+// 04 CAPTURE (any screenshot converted to ASCII; here a stand-in notebook screenshot).
+// Keys: 1-4 view, I invert, H label. URL params: ?m=0..3&inv=0|1&hud=0|1
+// All numbers and texts are placeholders.
+
+const params = new URLSearchParams(location.search);
+let view = Math.min(3, Math.max(0, Number(params.get('m') || 0)));
+let inverted = params.get('inv') === '1';
+let showHud = params.get('hud') !== '0';
+const CELL = 7;   // grid cell of this entry (code pictogram for now)
+
+const PROJECT = {
+  title: 'GPT-2 FROM SCRATCH',
+  language: 'PYTHON', year: '2026', type: 'DEEP LEARNING', duration: '6 WEEKS',
+  composition: [['PYTHON', 91], ['JUPYTER', 7], ['SHELL', 2]],
+  stack: ['PYTORCH', 'NUMPY', 'MATPLOTLIB'],
+  modelTitle: 'MODEL', model: ['124M PARAMETERS', '12 LAYERS x 12 HEADS', '50 257 TOKEN VOCAB'],
+  description: ['GPT-2 (124M) rebuilt from scratch in PyTorch:', 'tokenizer, transformer and training loop,', 'trained until it matches the original results.'],
+};
+const VIEWS = [
+  ['MODEL', '12 LAYERS x 12 HEADS, DRAG TO ORBIT'],
+  ['TRAINING', 'VALIDATION LOSS, LIVE CAPTURE'],
+  ['SAMPLE', 'TEXT GENERATED TOKEN BY TOKEN'],
+  ['CAPTURE', 'NOTEBOOK SCREENSHOT CONVERTED TO ASCII'],
+];
+const RAMP = ' .,-~:;=!*#$@';
+const ALPHA = [0.55, 0.75, 0.9, 1];
+const VIEW_FS = [11, 11, 15, 9];   // character size per view: bigger for text, finer for converted captures
+
+// 1920×1080 design space; the area under the reticle (x < 420, y < 340) stays free
+const L = {
+  band: [420, 1150], screen: [300, 345, 850, 445],
+  thumbs: [0, 1, 2, 3].map(i => [300 + i * 218, 812, 196, 100]),
+  back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
+};
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const crt = createCRT(canvas);
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+const staticCanvas = document.createElement('canvas');
+const sctx = staticCanvas.getContext('2d');
+let ctx = sctx, dpr, layout, capRatio = 0.6, w, h, u;
+let hoverId = null, flashUntil = -1, frameNo = 0, viewStart = 0;
+
+// ---- drawing helpers, in design coordinates -------------------------------------------
+const X = v => v / 1920 * w, Y = v => v / 1080 * h;
+function R(x, y, rw, rh, col = ON) { ctx.fillStyle = col; ctx.fillRect(X(x), Y(y), X(rw), Y(rh)); }
+function box(x, y, bw, bh, t, col = ON) {
+  ctx.fillStyle = col;
+  const px = X(x), py = Y(y), pw = X(bw), ph = Y(bh);
+  ctx.fillRect(px, py, pw, t); ctx.fillRect(px, py + ph - t, pw, t);
+  ctx.fillRect(px, py, t, ph); ctx.fillRect(px + pw - t, py, t, ph);
+}
+function setFont(cap, weight = 700) { ctx.font = `${weight} ${Math.round(cap * u / capRatio)}px "Handjet", monospace`; }
+function text(str, x, y, cap, { align = 'left', color = ON, weight = 700 } = {}) {
+  setFont(cap, weight); ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color; ctx.fillText(str, X(x), Y(y));
+}
+const textW = (str, cap, weight = 700) => { setFont(cap, weight); return ctx.measureText(str).width / w * 1920; };
+function arrow(cx, cy, s, dir, col = ON) {
+  const x = X(cx), y = Y(cy), k = s * u;
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x + dir * k * 0.5, y); ctx.lineTo(x, y - k * 0.45); ctx.lineTo(x, y - k * 0.18);
+  ctx.lineTo(x - dir * k * 0.5, y - k * 0.18); ctx.lineTo(x - dir * k * 0.5, y + k * 0.18);
+  ctx.lineTo(x, y + k * 0.18); ctx.lineTo(x, y + k * 0.45); ctx.closePath(); ctx.fill();
+}
+function branchIcon(cx, cy, s, col) {
+  const k = s * u, x = X(cx), y = Y(cy);
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = k * 0.14;
+  ctx.beginPath(); ctx.moveTo(x - k * 0.25, y - k * 0.38); ctx.lineTo(x - k * 0.25, y + k * 0.38);
+  ctx.moveTo(x + k * 0.25, y - k * 0.2); ctx.quadraticCurveTo(x + k * 0.25, y + k * 0.12, x - k * 0.25, y + k * 0.18); ctx.stroke();
+  for (const [ox, oy] of [[-0.25, -0.42], [-0.25, 0.42], [0.25, -0.28]]) { ctx.beginPath(); ctx.arc(x + ox * k, y + oy * k, k * 0.13, 0, Math.PI * 2); ctx.fill(); }
+}
+const inRect = (px, py, [x, y, bw, bh]) => px >= x && px < x + bw && py >= y && py < y + bh;
+
+function drawHeader() {
+  const { C } = layout;
+  const cx = X(270), cy = Y(206), Lw = C * 0.068, K = C * 0.05;
+  ctx.fillStyle = OFF; ctx.fillRect(w * 0.027 - K, cy - Lw / 2 - K, w * 0.946 + 2 * K, Lw + 2 * K); ctx.fillRect(cx - Lw / 2 - K, h * 0.015 - K, Lw + 2 * K, h * 0.97 + 2 * K);
+  ctx.fillStyle = ON; ctx.fillRect(w * 0.027, cy - Lw / 2, w * 0.946, Lw); ctx.fillRect(cx - Lw / 2, h * 0.015, Lw, h * 0.97);
+  const x = cx - C / 2, y = cy - C / 2, S = C * 0.865;
+  ctx.fillStyle = OFF; ctx.fillRect(x, y, C, C);
+  ctx.fillStyle = ON; ctx.fillRect(x + (C - S) / 2, y + (C - S) / 2, S, S);
+  drawPictoInverted(ctx, GRID[CELL], x, y, C, 1, 0.865);
+  const bt = C * 0.07, arm = C * 0.35, off = C * 0.15, bs = C + off * 2, bx = cx - bs / 2, by = cy - bs / 2;
+  ctx.fillStyle = ON;
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const px = bx + sx * bs, py = by + sy * bs;
+    ctx.fillRect(sx ? px - arm : px, sy ? py - bt : py, arm, bt);
+    ctx.fillRect(sx ? px - bt : px, sy ? py - arm : py, bt, arm);
+  }
+  const lx = cx + C / 2 + off + C * 0.1;
+  ctx.font = `700 ${Math.round(C * 0.15)}px "Handjet", monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`Archive entry ${String(CELL + 1).padStart(2, '0')} located. Opening file ...`, lx, cy - 0.64 * C);
+  setFont(0.3 * 180.48); ctx.fillText(`ENTRY ${String(CELL + 1).padStart(2, '0')}: ${PROJECT.title}`, lx, cy - 0.2 * C);
+}
+
+function button(id, [x, y, bw, bh], label, cap, t, icon) {
+  const on = hoverId === id;
+  if (on) R(x, y, bw, bh); else box(x, y, bw, bh, t);
+  const col = on ? OFF : ON;
+  const tw = textW(label, cap), iw = icon ? cap * 1.5 : 0, x0 = x + (bw - tw - iw) / 2;
+  if (icon === 'back') arrow(x0 + cap * 0.55, y + bh / 2, cap * 1.1, -1, col);
+  if (icon === 'git') branchIcon(x0 + cap * 0.5, y + bh / 2, cap * 1.3, col);
+  text(label, x0 + iw, y + bh / 2 + cap / 2, cap, { color: col });
+}
+function block(x, y0, label, value) { text(label, x, y0 + 26, 15, { weight: 600 }); text(value, x, y0 + 72, 26); }
+function swatch(kind, x, y, sw, sh, thin) {
+  if (kind === 0) { R(x, y, sw, sh); return; }
+  ctx.save(); ctx.beginPath(); ctx.rect(X(x), Y(y), X(sw), Y(sh)); ctx.clip();
+  if (kind === 1) {
+    ctx.strokeStyle = ON; ctx.lineWidth = 4 * u; ctx.beginPath();
+    for (let k = -sh; k < sw; k += 12) { ctx.moveTo(X(x + k), Y(y + sh)); ctx.lineTo(X(x + k + sh), Y(y)); }
+    ctx.stroke();
+  } else for (let yy = y + 5; yy < y + sh - 2; yy += 10) for (let xx = x + 5; xx < x + sw - 2; xx += 10) R(xx - 2, yy - 2, 4, 4);
+  ctx.restore();
+  box(x, y, sw, sh, thin * 0.7);
+}
+function list(x, y, title, items, step = 38) {
+  text(title, x, y, 15, { weight: 600 });
+  items.forEach((s, i) => { R(x, y + 23 + i * step, 14, 14); text(s, x + 30, y + 38 + i * step, 19); });
+}
+
+function drawStatic() {
+  ctx = sctx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = OFF; ctx.fillRect(0, 0, w, h);
+  drawHeader();
+  const st = layout.C * 0.05, thin = layout.C * 0.036;
+  const [b0, b1] = L.band, [sx, sy, sw, sh] = L.screen;
+  R(b0, 250, 150, 44); text(`VIEW 0${view + 1}`, b0 + 75, 284, 22, { align: 'center', color: OFF });
+  text(`${VIEWS[view][0]}  -  ${VIEWS[view][1]}`, b0 + 174, 284, 20);
+  text(`${grids[view].cols}x${grids[view].rows}`, b1, 284, 20, { align: 'right' });
+  for (let x = b0; x <= b1; x += 16) R(x, 308, 6, 22);
+  box(sx, sy, sw, sh, st);
+  L.thumbs.forEach((r, i) => {
+    const sel = i === view, hov = hoverId === `thumb${i}`;
+    box(r[0], r[1], r[2], r[3], sel || hov ? st : thin);
+    const label = `0${i + 1} ${VIEWS[i][0]}`, tw = textW(label, 13) + 18;
+    R(r[0], r[1], tw, 26, sel ? ON : OFF);
+    text(label, r[0] + 9, r[1] + 20, 13, { color: sel ? OFF : ON });
+  });
+  button('back', L.back, 'BACK', 22, thin, 'back');
+  text('OR PRESS ESC', 545, 1002, 15, { weight: 600 });
+  button('github', L.github, 'GITHUB', 24, thin, 'git');
+  button('launch', L.launch, 'LAUNCH', 36, st);
+
+  const x0 = 1200, x1 = 1540, xr = 1860;
+  block(x0, 250, 'LANGUAGE', PROJECT.language); block(x1, 250, 'YEAR', PROJECT.year);
+  R(x0, 340, xr - x0, thin / u);
+  block(x0, 355, 'TYPE', PROJECT.type); block(x1, 355, 'DURATION', PROJECT.duration);
+  R(x0, 445, xr - x0, thin / u);
+  text('COMPOSITION', x0, 490, 15, { weight: 600 });
+  let cx = x0;
+  PROJECT.composition.forEach(([, pct], i) => { const pw = (xr - x0) * pct / 100; swatch(i, cx, 506, pw, 34, thin); cx += pw; });
+  cx = x0;
+  PROJECT.composition.forEach(([name, pct], i) => {
+    swatch(i, cx, 562, 18, 18, layout.C * 0.03);
+    const label = `${name} ${pct}%`;
+    text(label, cx + 28, 578, 16, { weight: 600 });
+    cx += 28 + textW(label, 16, 600) + 34;
+  });
+  R(x0, 602, xr - x0, thin / u);
+  list(x0, 645, 'STACK', PROJECT.stack);
+  list(x1, 645, PROJECT.modelTitle, PROJECT.model);
+  PROJECT.description.forEach((line, i) => text(line, x0, 818 + i * 36, 17, { weight: 600 }));
+}
+
+// ---- character grids ---------------------------------------------------------------------
+function makeGrid(cols, rows) { return { cols, rows, chars: new Uint16Array(cols * rows), levels: new Int8Array(cols * rows).fill(-1) }; }
+function put(g, i, j, ch, lvl) {
+  i = Math.round(i); j = Math.round(j);
+  if (i < 0 || j < 0 || i >= g.cols || j >= g.rows) return;
+  const k = j * g.cols + i; g.chars[k] = ch.charCodeAt(0); g.levels[k] = lvl;
+}
+function puts(g, i, j, str, lvl) { for (let k = 0; k < str.length; k++) if (str[k] !== ' ') put(g, i + k, j, str[k], lvl); }
+const hash = n => { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); };
+
+// 01 MODEL: wireframe tower, 12 rings (layers) of 12 nodes (heads); a pulse climbs through the layers
+const cam = { yaw: 0.7, pitch: -0.42, dist: 4.2, vyaw: 0, vpitch: 0 };   // negative pitch = seen from above
+function rotInv([x, y, z], yaw, pitch) {
+  const c = Math.cos(-yaw), s = Math.sin(-yaw);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  const cp = Math.cos(-pitch), sp = Math.sin(-pitch);
+  return [x, y * cp - z * sp, y * sp + z * cp];
+}
+const N = 12, RING = 12, RADIUS = 0.8, GAP = 0.19;
+function model(cols, rows, aw, lh, t, small) {
+  const g = makeGrid(cols, rows), depth = new Float32Array(cols * rows).fill(1e9);
+  const half = rows * lh / 2, f = 0.42, dist = cam.dist * (small ? 0.8 : 1);
+  const pulse = Math.floor(t * 4) % (N + 3);
+  const pts = [];
+  for (let l = 0; l < N; l++) for (let k = 0; k < RING; k++) {
+    const a = k / RING * Math.PI * 2;
+    const c = rotInv([RADIUS * Math.cos(a), (l - (N - 1) / 2) * GAP, RADIUS * Math.sin(a)], cam.yaw, cam.pitch);
+    const cn = rotInv([Math.cos(a), 0, Math.sin(a)], cam.yaw, cam.pitch);
+    const zc = dist - c[2];
+    pts.push({ i: cols / 2 + c[0] / zc / f * half / aw, j: rows / 2 - c[1] / zc / f * half / lh, z: zc, front: cn[2] > -0.15, l });
+  }
+  const plot = (i, j, ch, z, lvl) => {
+    i = Math.round(i); j = Math.round(j);
+    if (i < 0 || j < 0 || i >= cols || j >= rows) return;
+    const k = j * cols + i;
+    if (lvl > g.levels[k] || (lvl === g.levels[k] && z < depth[k])) { depth[k] = z; g.levels[k] = lvl; g.chars[k] = ch.charCodeAt(0); }
+  };
+  const edge = (p, q, hot) => {
+    const di = q.i - p.i, dj = q.j - p.j, n = Math.ceil(Math.max(Math.abs(di), Math.abs(dj)) * 1.3) + 1;
+    const dx = di * aw, dy = dj * lh, ang = Math.abs(Math.atan2(dy, dx));
+    const front = p.front && q.front;
+    const ch = ang < 0.39 || ang > 2.75 ? '-' : ang > 1.18 && ang < 1.96 ? '|' : (dx * dy > 0 ? '\\' : '/');
+    for (let s = 0; s <= n; s++) {
+      const tt = s / n;
+      plot(p.i + di * tt, p.j + dj * tt, front ? ch : '.', p.z + (q.z - p.z) * tt, hot ? 3 : front ? 2 : 0);
+    }
+  };
+  for (let l = 0; l < N; l++) for (let k = 0; k < RING; k++) {
+    const p = pts[l * RING + k];
+    edge(p, pts[l * RING + (k + 1) % RING], l === pulse && p.front);
+    if (l < N - 1 && k % 2 === 0) edge(p, pts[(l + 1) * RING + k], false);
+  }
+  for (const p of pts) if (p.front) plot(p.i, p.j, p.l === pulse ? '@' : 'o', p.z - 0.01, p.l === pulse ? 3 : 2);
+  if (!small) {
+    puts(g, 1, 0, pulse < N ? `LAYER ${String(pulse + 1).padStart(2, '0')} / ${N}` : 'LOGITS', 2);
+    puts(g, 1, rows - 1, 'TOKENS IN', 1); puts(g, cols - 12, 0, 'LOGITS OUT', 1);
+  }
+  return g;
+}
+
+// 02 TRAINING: loss curve drawn live against the target line
+function training(cols, rows, aw, lh, tv, small) {
+  const g = makeGrid(cols, rows);
+  const left = small ? 1 : 7, top = small ? 0 : 1, bottom = small ? 0 : 2;
+  const pw = cols - left - 1, ph = rows - top - bottom - 1;
+  const vmax = 11, vmin = 2.5, target = 3.28;
+  const loss = s => 3.05 + 7.7 * Math.exp(-s / 0.045) + 0.45 * Math.exp(-s / 0.35) + (hash(Math.floor(s * 300)) - 0.5) * 0.3 * Math.exp(-s / 0.45);
+  const rowOf = v => top + Math.round((vmax - v) / (vmax - vmin) * (ph - 1));
+  if (!small) {
+    for (let j = top; j < top + ph; j++) put(g, left - 1, j, '|', 1);
+    for (let i = left - 1; i < cols; i++) put(g, i, top + ph, '-', 1);
+    put(g, left - 1, top + ph, '+', 1);
+    for (const v of [11, 9, 7, 5, 3]) { puts(g, 0, rowOf(v), v.toFixed(1).padStart(5), 1); put(g, left - 1, rowOf(v), '+', 1); }
+    [['0', 0], ['5K', 0.26], ['10K', 0.52], ['15K', 0.78], ['19K', 1]].forEach(([s, fr]) =>
+      puts(g, Math.min(cols - s.length, left + Math.round(fr * (pw - 1)) - Math.floor(s.length / 2)), top + ph + 1, s, 1));
+  }
+  const tr = rowOf(target);
+  for (let i = left; i < left + pw; i += 2) put(g, i, tr, '-', 0);
+  if (!small) puts(g, left + pw - 7, tr - 1, 'TARGET', 1);
+  const prog = Math.min(1, (tv % 9) / 6);   // draws in 6 s, holds 3 s
+  const n = Math.max(2, Math.floor(prog * pw));
+  let prev = rowOf(loss(0)), last = loss(0);
+  for (let i = 0; i < n; i++) {
+    last = loss(i / (pw - 1));
+    const r = rowOf(last);
+    if (r === prev) put(g, left + i, r, '-', 3);
+    else if (r > prev) { for (let j = prev; j < r; j++) put(g, left + i, j, '|', 3); put(g, left + i, r, '\\', 3); }
+    else { put(g, left + i, r, '/', 3); for (let j = r + 1; j < prev; j++) put(g, left + i, j, '|', 3); }
+    prev = r;
+  }
+  put(g, left + n - 1, prev, '@', 3);
+  if (!small) puts(g, left + 1, 0, `STEP ${String(Math.round(prog * 19073)).padStart(5, '0')}   VAL LOSS ${last.toFixed(3)}`, 2);
+  return g;
+}
+
+// 03 SAMPLE: a prompt, then generated tokens; alternating brightness shows token boundaries
+const PROMPT = 'The lighthouse keeper';
+const SAMPLE = ' counted the ships every night and wrote their names in a small blue notebook. When the fog came in, he read the names aloud, one by one, so that no ship would feel forgotten. In spring the notebook was full, and he started a second one.';
+const TOKENS = SAMPLE.match(/\s?[A-Za-z]+|\s?[^A-Za-z\s]/g);
+function sample(cols, rows, tv, small) {
+  const g = makeGrid(cols, rows);
+  let j = 0;
+  if (!small) {
+    puts(g, 0, 0, `$ python sample.py --prompt "${PROMPT}"`.slice(0, cols), 2);
+    puts(g, 0, 1, 'loading checkpoint step 19073 ... ok'.slice(0, cols), 1);
+    j = 3;
+  }
+  const shown = Math.min(TOKENS.length, Math.floor(tv * 9) % (TOKENS.length + 40));
+  const pieces = [[PROMPT, 3], ...TOKENS.slice(0, shown).map((tk, k) => [tk, k % 2 ? 1 : 3])];
+  let i = 0;
+  const width = cols - 1, bottomRow = small ? rows : rows - 2;
+  for (const [tk, lvl] of pieces) {
+    let piece = tk;
+    if (i + piece.length > width) { j++; i = 0; piece = piece.replace(/^\s/, ''); }
+    if (j >= bottomRow) break;
+    puts(g, i, j, piece, lvl); i += piece.length;
+  }
+  if (Math.floor(tv * 3) % 2 === 0 && j < bottomRow) put(g, i, j, '#', 3);
+  if (!small) puts(g, 0, rows - 1, `${shown + 4} tokens   temperature 0.8   top-k 50`.slice(0, cols), 1);
+  return g;
+}
+
+// 04 CAPTURE: generic screenshot -> ASCII converter (luminance ramp + edge glyphs from the gradient).
+// The screenshot here is a stand-in drawn on a canvas; real captures will be the project's own images.
+function standInScreenshot(W, H) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const gray = v => { const k = Math.round(v * 255); return `rgb(${k},${k},${k})`; };
+  g.fillStyle = gray(0.05); g.fillRect(0, 0, W, H);
+  g.fillStyle = gray(0.2); g.fillRect(0, 0, W, H * 0.09);
+  g.fillStyle = gray(0.7); g.font = `bold ${H * 0.055}px monospace`; g.textBaseline = 'middle';
+  g.fillText('train_gpt2.ipynb', W * 0.03, H * 0.047);
+  g.fillStyle = gray(0.11); g.fillRect(0, H * 0.09, W * 0.18, H);
+  g.fillStyle = gray(0.55); g.font = `bold ${H * 0.045}px monospace`;
+  ['data/', 'model.py', 'train.py', 'sample.py', 'bpe.py'].forEach((s, i) => g.fillText(s, W * 0.02, H * (0.16 + i * 0.075)));
+  g.strokeStyle = gray(0.45); g.lineWidth = H * 0.008; g.strokeRect(W * 0.21, H * 0.13, W * 0.76, H * 0.3);
+  g.fillStyle = gray(0.8); g.font = `bold ${H * 0.045}px monospace`;
+  ['for step in range(max_steps):', '    loss = model(x, y)', '    loss.backward()', '    optimizer.step()'].forEach((s, i) => g.fillText(s, W * 0.24, H * (0.18 + i * 0.065)));
+  const px = W * 0.25, py = H * 0.5, pw = W * 0.7, ph = H * 0.42;
+  g.fillStyle = gray(0.85); g.font = `bold ${H * 0.07}px sans-serif`; g.fillText('loss', W * 0.22, H * 0.49);
+  const area = g.createLinearGradient(0, py, 0, py + ph);
+  area.addColorStop(0, gray(0.4)); area.addColorStop(1, gray(0.04));
+  g.beginPath(); g.moveTo(px, py + ph);
+  for (let k = 0; k <= 60; k++) { const s = k / 60; g.lineTo(px + pw * s, py + ph * (1 - 0.92 * (0.1 + 0.9 * Math.exp(-s / 0.12)))); }
+  g.lineTo(px + pw, py + ph); g.closePath(); g.fillStyle = area; g.fill();
+  g.strokeStyle = gray(1); g.lineWidth = H * 0.018; g.beginPath();
+  for (let k = 0; k <= 60; k++) { const s = k / 60; const yy = py + ph * (1 - 0.92 * (0.1 + 0.9 * Math.exp(-s / 0.12))); k ? g.lineTo(px + pw * s, yy) : g.moveTo(px, yy); }
+  g.stroke();
+  g.strokeStyle = gray(0.5); g.lineWidth = H * 0.006; g.beginPath(); g.moveTo(px, py); g.lineTo(px, py + ph); g.lineTo(px + pw, py + ph); g.stroke();
+  return c;
+}
+const asciiCache = new Map();
+function toAscii(img, cols, rows) {
+  const key = `${cols}x${rows}`;
+  if (asciiCache.has(key)) return asciiCache.get(key);
+  const c = document.createElement('canvas'); c.width = cols; c.height = rows;
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, cols, rows);
+  const d = g.getImageData(0, 0, cols, rows).data;
+  const lum = (i, j) => d[(Math.min(rows - 1, Math.max(0, j)) * cols + Math.min(cols - 1, Math.max(0, i))) * 4] / 255;
+  const out = makeGrid(cols, rows);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const v = lum(i, j), gx = lum(i + 1, j) - lum(i - 1, j), gy = lum(i, j + 1) - lum(i, j - 1);
+    let ch, lvl;
+    if (Math.hypot(gx, gy) > 0.32) {
+      ch = Math.abs(gy) > 2 * Math.abs(gx) ? '-' : Math.abs(gx) > 2 * Math.abs(gy) ? '|' : (gx * gy > 0 ? '/' : '\\');
+      lvl = 3;
+    } else {
+      if (v < 0.09) continue;
+      ch = RAMP[Math.max(1, Math.round(v * (RAMP.length - 1)))]; lvl = Math.min(3, Math.floor(v * 4));
+    }
+    put(out, i, j, ch, lvl);
+  }
+  asciiCache.set(key, out);
+  return out;
+}
+let screenshot = null;
+function capture(cols, rows, tv, small) {
+  const full = toAscii(screenshot, cols, rows);
+  if (small) return full;
+  const reveal = Math.floor(tv * rows / 0.7);          // scans in, top to bottom, in 0.7 s
+  if (reveal >= rows) return full;
+  const g = makeGrid(cols, rows);
+  g.chars.set(full.chars.subarray(0, reveal * cols)); g.levels.set(full.levels.subarray(0, reveal * cols));
+  for (let i = 0; i < cols; i++) put(g, i, reveal, '=', 3);
+  return g;
+}
+
+function renderView(m, cols, rows, aw, lh, t, tv, small) {
+  if (m === 0) return model(cols, rows, aw, lh, t, small);
+  if (m === 1) return training(cols, rows, aw, lh, small ? t : tv, small);
+  if (m === 2) return sample(cols, rows, small ? t : tv, small);
+  return capture(cols, rows, tv, small);
+}
+
+function drawGrid(g, x0, y0, aw, lh, fs) {
+  ui.font = `800 ${fs}px "JetBrains Mono", monospace`;
+  ui.textBaseline = 'top'; ui.textAlign = 'left'; ui.fillStyle = ON;
+  for (let lvl = 0; lvl < 4; lvl++) {
+    ui.globalAlpha = ALPHA[lvl];
+    for (let j = 0; j < g.rows; j++) {
+      let line = '', any = false;
+      for (let i = 0; i < g.cols; i++) {
+        const k = j * g.cols + i;
+        if (g.levels[k] === lvl) { line += String.fromCharCode(g.chars[k]); any = true; } else line += ' ';
+      }
+      if (any) ui.fillText(line, x0, y0 + j * lh);
+    }
+  }
+  ui.globalAlpha = 1;
+}
+
+let grids = [];
+function measureGrid() {
+  const [, , sw, sh] = L.screen, inset = 22;
+  grids = VIEW_FS.map(size => {
+    const fs = size * u;
+    ui.font = `800 ${fs}px "JetBrains Mono", monospace`;
+    const aw = ui.measureText('M').width, lh = fs * 1.08;
+    return { fs, aw, lh, cols: Math.floor((X(sw) - X(2 * inset)) / aw), rows: Math.floor((Y(sh) - Y(2 * inset)) / lh) };
+  });
+}
+
+function drawDynamic(t) {
+  ctx = ui;
+  ui.setTransform(1, 0, 0, 1, 0, 0);
+  ui.drawImage(staticCanvas, 0, 0);
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const [sx, sy, sw, sh] = L.screen, inset = 22, { cols, rows, aw, lh, fs } = grids[view];
+  const x0 = X(sx + inset) + (X(sw - 2 * inset) - cols * aw) / 2, y0 = Y(sy + inset) + (Y(sh - 2 * inset) - rows * lh) / 2;
+  if (frameNo < flashUntil) R(sx + 14, sy + 14, sw - 28, sh - 28);
+  else drawGrid(renderView(view, cols, rows, aw, lh, t, t - viewStart, false), x0, y0, aw, lh, fs);
+  L.thumbs.forEach((r, i) => {
+    const tfs = 8 * u, tlh = tfs * 1.08;
+    ui.font = `800 ${tfs}px "JetBrains Mono", monospace`;
+    const taw = ui.measureText('M').width;
+    const tc = Math.floor((X(r[2]) - X(24)) / taw), tr = Math.floor((Y(r[3]) - Y(40)) / tlh);
+    const tx = X(r[0] + 12) + (X(r[2] - 24) - tc * taw) / 2, ty = Y(r[1] + 32);
+    drawGrid(renderView(i, tc, tr, taw, tlh, t, t, true), tx, ty, taw, tlh, tfs);
+  });
+}
+
+// ---- loop + input -------------------------------------------------------------------------
+let drag = null, lastInput = -1e9, clock = 0;
+function loop(now) {
+  frameNo++; clock = now / 1000;
+  if (!drag) {
+    cam.yaw += cam.vyaw; cam.pitch += cam.vpitch; cam.vyaw *= 0.94; cam.vpitch *= 0.9;
+    if (now - lastInput > 2500) cam.yaw += 0.004;
+  }
+  cam.pitch = Math.max(-1.2, Math.min(1.2, cam.pitch));
+  drawDynamic(clock);
+  crt.upload(uiCanvas);
+  crt.render(clock, { inverted });
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `view ${VIEWS[view][0]}${inverted ? ' · inverted' : ''}\nclick a thumbnail or 1-4 · drag MODEL to orbit · scroll to zoom · I invert · H hide`;
+  requestAnimationFrame(loop);
+}
+function setView(m) { if (m === view) return; view = m; viewStart = clock; flashUntil = frameNo + 3; drawStatic(); }
+const design = e => [e.clientX / w * 1920, e.clientY / h * 1080];
+function targetAt(px, py) {
+  for (const id of ['back', 'github', 'launch']) if (inRect(px, py, L[id])) return id;
+  const t = L.thumbs.findIndex(r => inRect(px, py, r));
+  if (t >= 0) return `thumb${t}`;
+  if (inRect(px, py, L.screen)) return 'screen';
+  return null;
+}
+canvas.addEventListener('pointerdown', e => {
+  const target = targetAt(...design(e));
+  lastInput = performance.now();
+  if (target === 'screen' && view === 0) { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; }
+  else if (target && target.startsWith('thumb')) setView(Number(target.slice(5)));
+});
+canvas.addEventListener('pointermove', e => {
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    cam.yaw -= dx * 0.008; cam.pitch += dy * 0.006; cam.vyaw = -dx * 0.008; cam.vpitch = dy * 0.006;
+    drag = { x: e.clientX, y: e.clientY }; lastInput = performance.now();
+    return;
+  }
+  const target = targetAt(...design(e)), id = target === 'screen' ? null : target;
+  canvas.style.cursor = target === 'screen' ? (view === 0 ? 'grab' : 'default') : target ? 'pointer' : 'default';
+  if (id !== hoverId) { hoverId = id; drawStatic(); }
+});
+addEventListener('pointerup', () => { if (drag) { drag = null; canvas.style.cursor = 'grab'; } });
+canvas.addEventListener('wheel', e => {
+  if (view !== 0 || targetAt(...design(e)) !== 'screen') return;
+  cam.dist = Math.max(2.6, Math.min(7, cam.dist * (1 + e.deltaY * 0.001)));
+  lastInput = performance.now(); e.preventDefault();
+}, { passive: false });
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k.length === 1 && '1234'.includes(k)) setView(Number(k) - 1);
+  if (k === 'i') inverted = !inverted;
+  if (k === 'h') showHud = !showHud;
+});
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  w = innerWidth; h = innerHeight;
+  const W = Math.round(w * dpr), H = Math.round(h * dpr);
+  crt.resize(W, H);
+  uiCanvas.width = staticCanvas.width = W; uiCanvas.height = staticCanvas.height = H;
+  layout = gridLayout(w, h);
+  u = layout.C / 180.48;
+  ctx = ui; ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  measureGrid();
+  asciiCache.clear();
+  drawStatic();
+}
+addEventListener('resize', resize);
+
+Promise.all([
+  document.fonts.load('700 40px "Handjet"'), document.fonts.load('600 40px "Handjet"'),
+  document.fonts.load('800 20px "JetBrains Mono"'), document.fonts.load('12px "Share Tech Mono"'),
+]).finally(() => {
+  sctx.font = '700 100px "Handjet"';
+  capRatio = sctx.measureText('E').actualBoundingBoxAscent / 100 || 0.6;
+  screenshot = standInScreenshot(1600, 900);
+  resize();
+  requestAnimationFrame(loop);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
