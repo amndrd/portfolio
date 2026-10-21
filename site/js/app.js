@@ -739,16 +739,18 @@ function selectionSfx(rel) {
   const desc = p.description.join('').length;
   if (typed(crel, BUILD.description.start, BUILD.description.rate, desc) && crel % 2 === 0) Sound.play('type', { gain: -5 });
 }
-// launch: the room tone drops out at the cut, a drone carries the log, then the screen switches off
+// launch: the room is muffled at the cut, the texts erase, a drone carries the log, the screen switches off
 function launchSfx(rel) {
   if (rel === SEQ.cut) { Sound.play('cut'); Sound.ambience(-12, 350, 0.04); }
+  if (rel === SEQ.erase) Sound.play('erase');
   const k = rel - SEQ.type;
   if (k === 0) Sound.start('drone');
-  if (k === SEQ.typeFrames + 1) { Sound.stop('drone'); Sound.play('off'); }
+  if (k === SEQ.typeFrames + 1) { Sound.stop('drone'); Sound.play('off'); Sound.ambience(-24, 250, 0.3); }
   const d = k - SEQ.typeFrames - 1 - SEQ.afterglow - SEQ.black;
   if (d === 0) Sound.ambience(-1, 2500, 1.5);
   if (d === DETAIL.title || d === DETAIL.title + 6 || d === DETAIL.sub) Sound.play('panel');
-  if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('panel');
+  if (d === DETAIL.title) Sound.play('thump');
+  if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('button');
 }
 function sfxAt(n) {
   if (n === muteShown) Sound.play('panel', { gain: -4 });

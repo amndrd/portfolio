@@ -9,6 +9,7 @@ const Sound = (() => {
   // level in dB, random detune in cents, voices that may overlap (the oldest is cut), fades in s
   const MIX = {
     room: { gain: -11, fadeIn: 2.5 },
+    drone: { gain: -25, fadeIn: 0.25, fadeOut: 0.03 },
     boot: { gain: -4 },
     cell: { gain: -15, detune: 250, voices: 6 },
     thump: { gain: -10, detune: 60, voices: 3 },
@@ -24,6 +25,10 @@ const Sound = (() => {
     row: { gain: -18, voices: 2 },
     button: { gain: -19 },
     scan: { gain: -19 },
+    launch: { gain: -12 },
+    cut: { gain: -14 },
+    erase: { gain: -22 },
+    off: { gain: -13 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};

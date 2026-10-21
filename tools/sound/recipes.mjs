@@ -114,4 +114,33 @@ export const cues = {
     const arcs = d.reverse(cut('loading_bleeps', 0.92, 1.07));
     return [d.fade(d.highpass(d.mix([[run, 0], [arcs, 0.03, -6]]), 300), 0.005, 0.06)];
   } },
+
+  // ---- launch ------------------------------------------------------------------------------------------------
+  // LAUNCH pressed: dark and heavy, as on the reference: the sub hit with its chord rolled off, a deep thump
+  // and only a hint of the retro attack
+  launch: { build() {
+    const hit = d.lowpass(d.fade(cut('Alien_Technology', 14.95, 16.40), 0.002, 0.5), 1500);
+    const attack = d.fade(cut('Select_Retro_Bleep', 0.035, 0.10), 0.001, 0.03);
+    return [d.lowshelf(d.highpass(d.mix([[hit, 0], [thump(0.85), 0, 0], [attack, 0, -14]]), 30), 100, 3)];
+  } },
+  // the panel cut off: a burst and a few flickers, ending dead; dark, the screen is going out
+  cut: { build() {
+    const flick = cut('Flickering_Signal', 0.60, 0.86), burst = cut('loading_bleeps', 0.065, 0.115);
+    return [d.lowpass(d.fade(d.mix([[burst, 0], [flick, 0.02, -2]]), 0.001, 0.01), 1600)];
+  } },
+  // the panel texts backspaced: the computing chatter played backwards, quick and muffled
+  erase: { build() {
+    const s = d.reverse(d.slice(src('Techy_Glide', { af: 'atempo=1.5' }), 0.06, 0.50));
+    return [d.lowpass(d.fade(d.highpass(s, 250), 0.01, 0.06), 2000)];
+  } },
+  // under the launch log: a low machine buzz, a held high chord and a data chatter, looped
+  drone: { loop: true, xfade: 0.5, build() {
+    const buzz = d.lowpass(cut('System_Start_Up', 0.8, 3.6), 900);
+    const chord = d.highpass(cut('Alien_Technology', 15.6, 17.2), 1200);
+    const chatter = d.highpass(cut('Techy_Glide', 0.09, 0.75), 2000);
+    const bed = d.mix([[buzz, 0], [chord, 0.2, -20], [chord, 1.6, -22], [chatter, 0.3, -24], [chatter, 1.4, -25]]);
+    return [d.slice(bed, 0, 2.8)];
+  } },
+  // the screen switching off: the start-up buzz falling in pitch, gone in half a second
+  off: { build: () => [d.lowpass(d.fade(d.slice(d.glide(cut('System_Start_Up', 0.4, 1.6), 1.0, 0.3, 0.55), 0, 0.7), 0.003, 0.3, 'fast'), 2000)] },
 };
