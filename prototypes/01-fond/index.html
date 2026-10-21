@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 01 · Background</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #9fe39b; opacity: .55; pointer-events: none; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script>
+// Prototype 01 — CRT background, three framing variants sharing one shader.
+// Keys: 1 / 2 / 3 switch variant, T cycles texture level, U toggles the test UI, H toggles this label.
+// URL params: ?v=a|b|c&t=0|1|2&ui=0|1&hud=0|1
+
+const VARIANTS = {
+  a: { name: 'A · Full screen',  curve: 0.0,   inset: 0.0,   radius: 0.0,   vignette: 0.30, bezel: 0, scan: 0.07 },
+  b: { name: 'B · TV set',       curve: 0.085, inset: 0.035, radius: 0.075, vignette: 0.55, bezel: 1, scan: 0.12 },
+  c: { name: 'C · Hybrid',       curve: 0.03,  inset: 0.0,   radius: 0.03,  vignette: 0.45, bezel: 0, scan: 0.10 },
+};
+
+const params = new URLSearchParams(location.search);
+let variant = VARIANTS[params.get('v')] ? params.get('v') : 'a';
+let showUI = params.get('ui') !== '0';
+let showHud = params.get('hud') !== '0';
+const TEXTURES = [{ name: 'clean', amount: 0 }, { name: 'medium', amount: 0.6 }, { name: 'strong', amount: 1 }];
+let textureLevel = TEXTURES[params.get('t')] ? Number(params.get('t')) : 1;
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
+
+const VERT = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+// Separable gaussian blur used for the phosphor bloom.
+const BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  float w[5] = float[](0.227, 0.194, 0.121, 0.054, 0.016);
+  vec3 s = texture(uTex, vUv).rgb * w[0];
+  for (int i = 1; i < 5; i++) {
+    s += texture(uTex, vUv + uDir * float(i)).rgb * w[i];
+    s += texture(uTex, vUv - uDir * float(i)).rgb * w[i];
+  }
+  o = vec4(s, 1.0);
+}`;
+
+const FINAL = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uUI;
+uniform sampler2D uBloom;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uCurve, uInset, uRadius, uVignette, uBezel, uScan, uShowUI, uTexture;
+
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  return v;
+}
+float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+
+// Phosphor ramp: intensity -> monochrome green sampled from the reference.
+vec3 ramp(float x) {
+  vec3 c0 = vec3(0.0, 7.0, 0.0) / 255.0;
+  vec3 c1 = vec3(7.0, 24.0, 6.0) / 255.0;
+  vec3 c2 = vec3(46.0, 118.0, 44.0) / 255.0;
+  vec3 c3 = vec3(206.0, 255.0, 203.0) / 255.0;
+  vec3 c4 = vec3(242.0, 255.0, 240.0) / 255.0;
+  if (x < 0.07) return mix(c0, c1, x / 0.07);
+  if (x < 0.35) return mix(c1, c2, (x - 0.07) / 0.28);
+  if (x < 0.90) return mix(c2, c3, (x - 0.35) / 0.55);
+  return mix(c3, c4, clamp((x - 0.90) / 0.4, 0.0, 1.0));
+}
+
+// Smooth horizontal band drifting slowly down the screen.
+float band(float y, float speed, float offset, float width) {
+  float c = 1.0 - fract(offset + uTime * speed);
+  float d = abs(y - c); d = min(d, 1.0 - d);
+  return exp(-pow(d / width, 2.0));
+}
+
+void main() {
+  vec2 frag = vUv * uRes;
+  float minDim = min(uRes.x, uRes.y);
+  float tick = floor(uTime * 15.0);              // discrete 15 Hz clock, as in the reference
+
+  // Screen rectangle (inset only for the TV variant), then barrel curvature.
+  vec2 insetPx = vec2(uInset * minDim);
+  vec2 s = (frag - insetPx) / (uRes - 2.0 * insetPx);
+  vec2 c = s * 2.0 - 1.0;
+  c += c * (c.yx * c.yx) * uCurve * vec2(1.0, 1.3);
+  vec2 uv = c * 0.5 + 0.5;
+
+  vec2 sizePx = uRes - 2.0 * insetPx;
+  float rPx = uRadius * minDim;
+  float d = sdRoundBox((uv - 0.5) * sizePx, sizePx * 0.5, rPx);
+  float screenMask = 1.0 - smoothstep(-1.5, 1.5, d);
+
+  // ---- background -------------------------------------------------------
+  vec2 p = vec2(uv.x * uRes.x / uRes.y, uv.y);
+  float m1 = fbm(p * 1.8 + vec2(uTime * 0.010, -uTime * 0.006));
+  float m2 = fbm(p * 6.5 - vec2(uTime * 0.018, 0.0));
+  float I = 0.05 + (m1 - 0.5) * 0.06 + (m2 - 0.5) * 0.018;
+  I += 0.025 * (1.0 - length((uv - 0.5) * vec2(1.1, 1.5)));
+
+  // texture level: soft clouds + brighter cloudy edges (a clean take on the reference's grime)
+  float cl1 = fbm(p * 1.2 + vec2(-uTime * 0.004, uTime * 0.003));
+  float cl2 = fbm(p * 3.5 + 7.0);
+  float cl3 = fbm(p * 9.0 - 2.0);
+  I += ((cl1 - 0.5) * 0.17 + (cl2 - 0.5) * 0.08 + (cl3 - 0.5) * 0.05 * uTexture) * uTexture;
+  float edgeN = fbm(p * 2.4 + 3.0);
+  float rr = length((uv - 0.5) * vec2(1.0, 1.25)) + (edgeN - 0.5) * 0.3;
+  I += smoothstep(0.4, 0.8, rr) * smoothstep(0.4, 0.7, edgeN) * 0.24 * uTexture;
+  I += step(0.9988, hash(floor(frag / (2.0 * max(1.0, uRes.y / 1000.0))))) * 0.07 * uTexture;
+
+  float b1 = band(uv.y, 0.011, 0.33, 0.022);
+  float b2 = band(uv.y, 0.007, 0.70, 0.030);
+  float bands = b1 + b2 * 0.8;
+  float streak = noise(vec2(uv.x * 4.0 + tick * 0.7, uv.y * uRes.y * 0.35));
+  I += bands * (0.018 + 0.05 * streak * streak);
+
+  float grainScale = max(1.0, uRes.y / 1000.0);
+  float g = hash(floor(frag / grainScale) + tick * 13.7) - 0.5;
+  I += g * 0.032;
+
+  // ---- UI layer + bloom -------------------------------------------------
+  float jitter = (b1 + b2) * (noise(vec2(uv.y * 90.0, tick)) - 0.5) * 0.0009;
+  float ui = texture(uUI, uv + vec2(jitter, 0.0)).r * uShowUI;
+  float bloom = texture(uBloom, uv).r * uShowUI;
+  I = I * (1.0 - ui * 0.7) + ui * (0.95 + g * 0.18) + bloom * 0.5;
+
+  // ---- screen effects ---------------------------------------------------
+  float scan = 0.5 + 0.5 * cos(uv.y * sizePx.y / (2.5 * grainScale) * 6.2832);
+  I *= 1.0 - uScan * scan;
+  vec2 vq = uv * (1.0 - uv.yx);
+  float vig = pow(clamp(vq.x * vq.y * 16.0, 0.0, 1.0), 0.28);
+  I *= mix(1.0, vig, uVignette);
+
+  vec3 col = ramp(I);
+  // faint glass reflection, top-left
+  col += vec3(0.6, 1.0, 0.6) * 0.018 * smoothstep(0.9, 0.0, length(uv - vec2(0.18, 0.86))) * uBezel;
+  col *= screenMask;
+
+  // ---- TV bezel (variant B) --------------------------------------------
+  if (uBezel > 0.5) {
+    float edge = max(d, 0.0);
+    float rim = exp(-edge / (0.012 * minDim)) * (1.0 - screenMask);
+    vec3 plastic = vec3(0.010, 0.016, 0.010) + vec3(0.012, 0.02, 0.012) * (1.0 - vUv.y);
+    vec3 bez = plastic + vec3(0.12, 0.30, 0.12) * rim * 0.35;
+    col = mix(bez, col, screenMask);
+  }
+
+  o = vec4(col, 1.0);
+}`;
+
+function shader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'aPos');
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
+    const name = gl.getActiveUniform(p, i).name;
+    u[name] = gl.getUniformLocation(p, name);
+  }
+  return { p, u };
+}
+function texture(w, h) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if (w) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  return t;
+}
+function target(w, h) {
+  const tex = texture(w, h);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { tex, fb, w, h };
+}
+
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const blurProg = program(BLUR);
+const finalProg = program(FINAL);
+
+// ---- test UI, drawn white-on-black into a 2D canvas -----------------------
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+const uiTex = texture();
+let bloomA, bloomB, W, H, dpr;
+
+function drawTestUI() {
+  const w = innerWidth, h = innerHeight;
+  uiCanvas.width = W; uiCanvas.height = H;
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.fillStyle = '#000'; ui.fillRect(0, 0, w, h);
+
+  const cell = Math.min(w * 0.094, h * 0.17);
+  const gap = cell * 0.2;
+  const stroke = cell * 0.045;
+  const gw = cell * 5 + gap * 4, gh = cell * 3 + gap * 2;
+  const x0 = (w - gw) / 2, y0 = (h - gh) / 2;
+  const cellX = i => x0 + i * (cell + gap), cellY = j => y0 + j * (cell + gap);
+
+  ui.strokeStyle = '#fff'; ui.fillStyle = '#fff'; ui.lineWidth = stroke;
+  for (let j = 0; j < 3; j++) for (let i = 0; i < 5; i++) {
+    const x = cellX(i), y = cellY(j);
+    ui.globalAlpha = (i === 1 && j === 2) ? 0.35 : 1;
+    ui.strokeRect(x + stroke / 2, y + stroke / 2, cell - stroke, cell - stroke);
+    // placeholder glyphs until the pictograms step
+    const cx = x + cell / 2, cy = y + cell / 2, r = cell * 0.22;
+    ui.beginPath();
+    switch ((i + j * 5) % 4) {
+      case 0: ui.arc(cx, cy, r, 0, Math.PI * 2); ui.lineWidth = stroke * 1.4; ui.stroke(); break;
+      case 1: ui.rect(cx - r, cy - r, r * 2, r * 2); ui.fill(); break;
+      case 2: ui.moveTo(cx, cy - r); ui.lineTo(cx + r, cy + r * 0.8); ui.lineTo(cx - r, cy + r * 0.8); ui.closePath(); ui.fill(); break;
+      case 3: ui.lineWidth = stroke * 1.4; ui.moveTo(cx - r, cy); ui.lineTo(cx + r, cy); ui.moveTo(cx, cy - r); ui.lineTo(cx, cy + r); ui.stroke(); break;
+    }
+    ui.lineWidth = stroke;
+  }
+  ui.globalAlpha = 1;
+
+  // crosshair locked on row 2 / column 4, lines knocked out with a dark margin
+  const tx = cellX(3) + cell / 2, ty = cellY(1) + cell / 2;
+  const line = stroke * 0.9, knock = stroke * 2.2;
+  ui.fillStyle = '#000';
+  ui.fillRect(w * 0.03, ty - knock / 2, w * 0.94, knock);
+  ui.fillRect(tx - knock / 2, h * 0.02, knock, h * 0.96);
+  ui.fillStyle = '#fff';
+  ui.fillRect(w * 0.03, ty - line / 2, w * 0.94, line);
+  ui.fillRect(tx - line / 2, h * 0.02, line, h * 0.96);
+
+  // reticle brackets around the target cell
+  const m = cell * 0.18, arm = cell * 0.22, bx = cellX(3) - m, by = cellY(1) - m, bs = cell + m * 2;
+  ui.lineWidth = stroke; ui.strokeStyle = '#fff';
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const px = bx + sx * bs, py = by + sy * bs, dx = sx ? -1 : 1, dy = sy ? -1 : 1;
+    ui.beginPath();
+    ui.moveTo(px + dx * arm, py); ui.lineTo(px, py); ui.lineTo(px, py + dy * arm);
+    ui.stroke();
+  }
+
+  ui.font = `${Math.round(cell * 0.13)}px "Share Tech Mono", monospace`;
+  ui.textBaseline = 'middle';
+  ui.fillText('Boot sequence complete. Awaiting input ...', bx + bs + cell * 0.12, ty - cell * 0.3);
+
+  gl.bindTexture(gl.TEXTURE_2D, uiTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, uiCanvas);
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  W = Math.round(innerWidth * dpr); H = Math.round(innerHeight * dpr);
+  canvas.width = W; canvas.height = H;
+  bloomA = target(W >> 1, H >> 1);
+  bloomB = target(W >> 1, H >> 1);
+  drawTestUI();
+}
+
+function blur(src, dst, dx, dy) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+  gl.viewport(0, 0, dst.w, dst.h);
+  gl.useProgram(blurProg.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src);
+  gl.uniform1i(blurProg.u.uTex, 0);
+  gl.uniform2f(blurProg.u.uDir, dx / dst.w, dy / dst.h);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function frame(now) {
+  const v = VARIANTS[variant];
+  // bloom: two blur iterations at half resolution
+  blur(uiTex, bloomA, 2.5, 0); blur(bloomA.tex, bloomB, 0, 2.5);
+  blur(bloomB.tex, bloomA, 5, 0); blur(bloomA.tex, bloomB, 0, 5);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(finalProg.p);
+  const u = finalProg.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, uiTex); gl.uniform1i(u.uUI, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloomB.tex); gl.uniform1i(u.uBloom, 1);
+  gl.uniform2f(u.uRes, W, H);
+  gl.uniform1f(u.uTime, now / 1000);
+  gl.uniform1f(u.uCurve, v.curve);
+  gl.uniform1f(u.uInset, v.inset);
+  gl.uniform1f(u.uRadius, v.radius);
+  gl.uniform1f(u.uVignette, v.vignette);
+  gl.uniform1f(u.uBezel, v.bezel);
+  gl.uniform1f(u.uScan, v.scan);
+  gl.uniform1f(u.uShowUI, showUI ? 1 : 0);
+  gl.uniform1f(u.uTexture, TEXTURES[textureLevel].amount);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `${v.name} · texture ${TEXTURES[textureLevel].name}\n1 / 2 / 3  variant   T  texture   U  test UI   H  hide`;
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  if (e.key === '1') variant = 'a';
+  if (e.key === '2') variant = 'b';
+  if (e.key === '3') variant = 'c';
+  if (e.key.toLowerCase() === 't') textureLevel = (textureLevel + 1) % TEXTURES.length;
+  if (e.key.toLowerCase() === 'u') showUI = !showUI;
+  if (e.key.toLowerCase() === 'h') showHud = !showHud;
+});
+addEventListener('resize', resize);
+
+document.fonts.load('20px "Share Tech Mono"').finally(() => {
+  resize();
+  requestAnimationFrame(frame);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
