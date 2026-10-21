@@ -12,6 +12,7 @@ const Sound = (() => {
     boot: { gain: -4 },
     cell: { gain: -15, detune: 250, voices: 6 },
     thump: { gain: -10, detune: 60, voices: 3 },
+    hover: { gain: -16, detune: 120, voices: 1 },
   };
   let ac = null, master = null, sfx = null, bed = null, bedTone = null, manifest = null, room = null;
   const buffers = {}, playing = {}, last = {};

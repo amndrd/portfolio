@@ -52,4 +52,8 @@ export const cues = {
   } },
   // the thump under big elements appearing, three slightly different drops
   thump: { build: () => [thump(), thump(0.92), thump(1.08)] },
+
+  // ---- pointer ---------------------------------------------------------------------------------------
+  // a short chatter of bright scroll clicks (about 0.28 s), in the spirit of the igloo.inc hover
+  hover: { build: () => [d.highpass(d.fade(cut('Scroll_Clicks', 0.085, 0.370), 0.001, 0.04), 300)] },
 };
