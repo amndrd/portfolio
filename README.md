@@ -2,7 +2,7 @@
 
 A portfolio site styled as an old CRT terminal: worn white-on-black interface, phosphor grain, and a frame-timed animation for every step. Projects sit in a 3 × 5 grid of pictograms. Pick one and a crosshair flies to it, the cell flips and moves to the top-left, and a project panel builds itself around a live ASCII view of the project. LAUNCH plays a boot log before the detail page.
 
-Everything is drawn on a single canvas and filtered through a WebGL CRT pass. The site is silent for now: recorded sounds are being chosen and will be wired to the cue names in `site/js/sound.js`.
+Everything is drawn on a single canvas and filtered through a WebGL CRT pass. Every step has its sound: library effects cut, transformed and mixed for the site, timed on the animation frames (see [docs/sound-design.md](docs/sound-design.md)).
 
 ![Grid](docs/screenshots/grid.png)
 ![Project panel](docs/screenshots/panel.png)
@@ -17,6 +17,16 @@ python3 -m http.server 8080
 ```
 
 Then open <http://localhost:8080>.
+
+### Sounds
+
+The sound files are licensed library sounds, so they are not in the repository: without them the site simply runs silent. To build them, put the source library in `sounds-src/` and run (Node and ffmpeg needed):
+
+```sh
+node tools/sound/build.mjs            # every cue; or name some: node tools/sound/build.mjs hover lock
+```
+
+It writes `site/sounds/` (git-ignored too). The recipes are in `tools/sound/recipes.mjs`, the mix levels at the top of `site/js/sound.js`.
 
 | Input | Action |
 |---|---|
@@ -49,9 +59,12 @@ site/                  the website
   js/grid.js           grid geometry, cell frames, pictogram drawing
   js/pictos.js         placeholder pictograms (drawn in code)
   js/projects.js       project entries: edit this file to add content
-  js/sound.js          sound cues and mute state (silent until the recorded sounds are wired)
+  js/sound.js          sample player: mix levels, variants, voices, ambience, mute
+  sounds/              built sounds and their manifest (git-ignored)
 prototypes/            the step-by-step design explorations that led to the site
-tools/                 Playwright scripts: screenshots, frame sequences, end-to-end test, audio recording
+tools/                 Playwright scripts: screenshots, frame sequences, end-to-end and sound tests, audio recording
+  sound/               sound build: dsp.mjs (editing), recipes.mjs (one per cue), build.mjs, check.mjs
+sounds-src/            the source sound library (git-ignored)
 ```
 
 ### Adding a project
@@ -67,6 +80,8 @@ node site-test.mjs                    # end-to-end run of the whole flow (site s
 node capture.mjs <page> <out> name=query ...   # screenshots of a prototype
 node sequence.mjs <page> <out> <query> <from> <to>   # frame-by-frame export
 node record-audio.mjs                 # records the site's audio over a scripted run
+node sound-test.mjs                   # sounds load and play, hover never stacks, mute, silent without files
+node sound/check.mjs <reference>      # the scripted run against a reference clip: spectrograms, level per moment
 ```
 
 The scripts drive the locally installed Google Chrome through Playwright.

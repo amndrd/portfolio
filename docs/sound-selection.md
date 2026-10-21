@@ -2,6 +2,8 @@
 
 Sons pour remplacer l'ancien jeu de sons synthétisés. Chaque section correspond à un nom de cue dans `site/js/sound.js`, déclenché au même instant que dans la vidéo de référence.
 
+La sélection finale, faite à partir des fichiers effectivement réunis, et le montage de chaque son sont décrits dans [sound-design.md](sound-design.md).
+
 ## ⚠️ À vérifier avant d'acheter : la licence
 
 D'après le centre d'aide d'Artlist :
