@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype 02 · UI treatment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Handjet:wght@500..800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 14px; bottom: 12px;
+    font: 12px/1.5 "Share Tech Mono", ui-monospace, monospace;
+    color: #bbb; opacity: .55; pointer-events: none; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud"></div>
+<script>
+// Prototype 02 — worn, heavy UI treatment over the clean full-screen background.
+// Keys: C cycles colour, G toggles wear, U toggles the UI, H toggles this label.
+// URL params: ?c=green|warm|cold&g=0|1&ui=0|1&hud=0|1
+
+// Proportions measured on the reference, as fractions of one cell.
+const P = {
+  cellOfWidth: 0.094, cellOfHeight: 0.17,
+  gap: 0.165,          // space between cells
+  outline: 0.05,       // cell frame thickness
+  pictoBox: 0.74,      // pictogram area inside the cell
+  line: 0.068,         // crosshair line thickness
+  knock: 0.05,         // dark margin around crosshair elements
+  bracket: 0.053,      // reticle bracket thickness
+  bracketArm: 0.35,
+  bracketOffset: 0.15, // from the cell's outer edge to the bracket's outer edge
+  label: 0.15,         // label font size
+};
+
+const PALETTES = {
+  green: { name: 'green phosphor', stops: ['#000700', '#071806', '#2e762c', '#ceffcb', '#f2fff0'] },
+  warm:  { name: 'white (warm)',   stops: ['#030302', '#121210', '#4d4c47', '#ecebe3', '#ffffff'] },
+  cold:  { name: 'white (cold)',   stops: ['#010203', '#0d1114', '#434b52', '#e4edf5', '#ffffff'] },
+};
+
+const params = new URLSearchParams(location.search);
+let palette = PALETTES[params.get('c')] ? params.get('c') : 'green';
+let wear = params.get('g') !== '0';
+let showUI = params.get('ui') !== '0';
+let showHud = params.get('hud') !== '0';
+
+const canvas = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
+
+const VERT = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  float w[5] = float[](0.227, 0.194, 0.121, 0.054, 0.016);
+  vec3 s = texture(uTex, vUv).rgb * w[0];
+  for (int i = 1; i < 5; i++) {
+    s += texture(uTex, vUv + uDir * float(i)).rgb * w[i];
+    s += texture(uTex, vUv - uDir * float(i)).rgb * w[i];
+  }
+  o = vec4(s, 1.0);
+}`;
+
+const FINAL = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uUI;
+uniform sampler2D uBloom;
+uniform vec2 uRes;
+uniform float uTime, uShowUI, uWear;
+uniform vec3 uC0, uC1, uC2, uC3, uC4;
+
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  return v;
+}
+
+vec3 ramp(float x) {
+  if (x < 0.07) return mix(uC0, uC1, x / 0.07);
+  if (x < 0.35) return mix(uC1, uC2, (x - 0.07) / 0.28);
+  if (x < 0.90) return mix(uC2, uC3, (x - 0.35) / 0.55);
+  return mix(uC3, uC4, clamp((x - 0.90) / 0.4, 0.0, 1.0));
+}
+
+float band(float y, float speed, float offset, float width) {
+  float c = 1.0 - fract(offset + uTime * speed);
+  float d = abs(y - c); d = min(d, 1.0 - d);
+  return exp(-pow(d / width, 2.0));
+}
+
+// Static screen-space wear: specks, blotches, scratches. Darkens the UI only.
+float wearMask(vec2 frag, float gs) {
+  float speck  = smoothstep(0.90, 0.96, noise(frag / (2.6 * gs)));
+  float speck2 = smoothstep(0.91, 0.97, noise(frag / (7.0 * gs) + 5.0));
+  // organic dirt: domain-warped fbm, thresholded into sparse irregular smudges
+  vec2 q = frag / (45.0 * gs);
+  q += vec2(fbm(q * 0.7), fbm(q * 0.7 + 5.2)) * 1.6;
+  float dirt = smoothstep(0.60, 0.70, fbm(q));
+  float film = noise(frag / (1.6 * gs) + 9.0);
+  float m = 1.0;
+  m *= 1.0 - speck * 0.55;
+  m *= 1.0 - speck2 * 0.5;
+  m *= 1.0 - dirt * (0.55 + 0.3 * film);
+  m *= 1.0 - 0.05 * film;
+  return m;
+}
+
+void main() {
+  vec2 frag = vUv * uRes;
+  vec2 uv = vUv;
+  vec2 px = 1.0 / uRes;
+  float gs = max(1.0, uRes.y / 1000.0);
+  float tick = floor(uTime * 15.0);
+
+  // ---- background (clean full screen, medium texture) -------------------
+  vec2 p = vec2(uv.x * uRes.x / uRes.y, uv.y);
+  float I = 0.05;
+  I += (fbm(p * 1.8 + vec2(uTime * 0.010, -uTime * 0.006)) - 0.5) * 0.06;
+  I += (fbm(p * 6.5 - vec2(uTime * 0.018, 0.0)) - 0.5) * 0.018;
+  I += 0.025 * (1.0 - length((uv - 0.5) * vec2(1.1, 1.5)));
+  float tex = 0.6;
+  float cl1 = fbm(p * 1.2 + vec2(-uTime * 0.004, uTime * 0.003));
+  float cl2 = fbm(p * 3.5 + 7.0);
+  float cl3 = fbm(p * 9.0 - 2.0);
+  I += ((cl1 - 0.5) * 0.17 + (cl2 - 0.5) * 0.08 + (cl3 - 0.5) * 0.05 * tex) * tex;
+  float edgeN = fbm(p * 2.4 + 3.0);
+  float rr = length((uv - 0.5) * vec2(1.0, 1.25)) + (edgeN - 0.5) * 0.3;
+  I += smoothstep(0.4, 0.8, rr) * smoothstep(0.4, 0.7, edgeN) * 0.24 * tex;
+
+  float b1 = band(uv.y, 0.011, 0.33, 0.022);
+  float b2 = band(uv.y, 0.007, 0.70, 0.030);
+  float streak = noise(vec2(uv.x * 4.0 + tick * 0.7, uv.y * uRes.y * 0.35));
+  I += (b1 + b2 * 0.8) * (0.018 + 0.05 * streak * streak);
+
+  float g = hash(floor(frag / gs) + tick * 13.7) - 0.5;
+  I += g * 0.032;
+
+  // ---- UI: eroded edges, analog softness, wear --------------------------
+  vec2 erode = vec2(noise(frag / (6.0 * gs) + 11.0), noise(frag / (6.0 * gs) + 37.0)) - 0.5;
+  float jitter = (b1 + b2) * (noise(vec2(uv.y * 90.0, tick)) - 0.5) * 0.0009;
+  vec2 uvUI = uv + erode * px * 0.7 * gs * uWear + vec2(jitter, 0.0);
+  vec2 d = px * gs * 1.4;
+  float ui = texture(uUI, uvUI).r * 0.4
+           + (texture(uUI, uvUI + vec2(d.x, 0)).r + texture(uUI, uvUI - vec2(d.x, 0)).r
+           +  texture(uUI, uvUI + vec2(0, d.y)).r + texture(uUI, uvUI - vec2(0, d.y)).r) * 0.15;
+  ui *= mix(1.0, wearMask(frag, gs), uWear);
+  ui *= 0.93 + 0.07 * noise(frag / (160.0 * gs));
+  ui *= uShowUI;
+  float bloom = texture(uBloom, uv).r * uShowUI;
+
+  // UI settles on the measured stroke colour (ramp stop 3), bloom stays subtle
+  I = mix(I, 0.85 + g * 0.05, ui) + bloom * 0.08;
+
+  float scan = 0.5 + 0.5 * cos(frag.y / (2.5 * gs) * 6.2832);
+  I *= 1.0 - 0.03 * scan;
+  vec2 vq = uv * (1.0 - uv.yx);
+  I *= mix(1.0, pow(clamp(vq.x * vq.y * 16.0, 0.0, 1.0), 0.28), 0.3);
+
+  o = vec4(ramp(I), 1.0);
+}`;
+
+function shader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'aPos');
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
+    const name = gl.getActiveUniform(p, i).name;
+    u[name] = gl.getUniformLocation(p, name);
+  }
+  return { p, u };
+}
+function texture(w, h) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if (w) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  return t;
+}
+function target(w, h) {
+  const tex = texture(w, h);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { tex, fb, w, h };
+}
+function hex(c) { return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16) / 255); }
+
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const blurProg = program(BLUR);
+const finalProg = program(FINAL);
+
+// ---- pictograms: original set, drawn white on black in a 100×100 box -------
+const ON = '#fff', OFF = '#000', SW = 8.5;
+
+function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+function disc(c, x, y, r, col) { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+function poly(c, pts, col) {
+  c.fillStyle = col; c.beginPath(); c.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]);
+  c.closePath(); c.fill();
+}
+function strokePath(c, pts, w, col = ON) {
+  c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]);
+  c.stroke();
+}
+
+const PICTOS = {
+  camera(c) {
+    c.fillStyle = ON; rr(c, 8, 30, 84, 54, 6); c.fill(); c.fillRect(32, 19, 28, 13);
+    disc(c, 50, 57, 21, OFF); disc(c, 50, 57, 12.5, ON); disc(c, 46, 53, 3.5, OFF);
+    c.fillStyle = OFF; c.fillRect(74, 38, 11, 7);
+  },
+  pencil(c) {
+    c.save(); c.translate(52, 46); c.rotate(-Math.PI / 4);
+    c.fillStyle = ON;
+    c.fillRect(-47, -11, 9, 22);           // eraser
+    c.fillRect(-35, -11, 6, 22);           // ferrule
+    c.fillRect(-26, -11, 42, 22);          // body
+    poly(c, [19, -11, 45, 0, 19, 11], ON); // cone
+    c.fillStyle = OFF;
+    c.fillRect(-26, -1.5, 42, 3);          // body groove
+    c.fillRect(33, -8, 3, 16);             // lead / wood split
+    c.restore();
+    c.fillStyle = ON; c.fillRect(10, 88, 34, 6);
+  },
+  globe(c) {
+    c.save(); c.beginPath(); c.arc(50, 50, 40, 0, Math.PI * 2); c.clip();
+    c.strokeStyle = ON; c.lineWidth = SW * 0.8;
+    c.beginPath(); c.ellipse(50, 50, 16, 40, 0, 0, Math.PI * 2); c.stroke();
+    strokePath(c, [10, 50, 90, 50], SW * 0.8); strokePath(c, [50, 8, 50, 92], SW * 0.8);
+    strokePath(c, [10, 30, 90, 30], SW * 0.7); strokePath(c, [10, 70, 90, 70], SW * 0.7);
+    c.restore();
+    c.strokeStyle = ON; c.lineWidth = SW; c.beginPath(); c.arc(50, 50, 40 - SW / 2, 0, Math.PI * 2); c.stroke();
+  },
+  truck(c) {
+    c.fillStyle = ON; c.fillRect(4, 24, 58, 46);
+    poly(c, [66, 36, 82, 36, 96, 54, 96, 70, 66, 70], ON);
+    poly(c, [71, 42, 80, 42, 89, 54, 71, 54], OFF);
+    for (const x of [24, 80]) { disc(c, x, 74, 15, OFF); disc(c, x, 74, 10, ON); disc(c, x, 74, 3.5, OFF); }
+  },
+  headphones(c) {
+    c.strokeStyle = ON; c.lineWidth = SW; c.beginPath(); c.arc(50, 58, 35, Math.PI, 0); c.stroke();
+    c.fillStyle = ON; rr(c, 8, 52, 22, 36, 5); c.fill(); rr(c, 70, 52, 22, 36, 5); c.fill();
+    c.fillStyle = OFF; c.fillRect(21, 58, 4, 24); c.fillRect(75, 58, 4, 24);
+  },
+  film(c) {
+    c.fillStyle = ON; c.fillRect(12, 44, 76, 44);
+    c.fillStyle = OFF; c.fillRect(12, 54, 76, 4);
+    c.save(); c.translate(12, 38); c.rotate(-0.24);
+    c.fillStyle = ON; c.fillRect(0, -14, 77, 14);
+    for (let i = 0; i < 4; i++) poly(c, [8 + i * 19, 0, 17 + i * 19, -14, 25 + i * 19, -14, 16 + i * 19, 0], OFF);
+    c.restore();
+    for (let i = 0; i < 4; i++) poly(c, [16 + i * 19, 44, 24 + i * 19, 44, 30 + i * 19, 54, 22 + i * 19, 54], OFF);
+  },
+  mountain(c) {
+    poly(c, [2, 88, 38, 28, 56, 56, 68, 40, 98, 88], ON);
+    strokePath(c, [25, 50, 31, 56, 38, 48, 45, 56, 51, 50], SW * 0.6, OFF);
+    disc(c, 78, 20, 9, ON);
+  },
+  code(c) {
+    c.lineJoin = 'miter'; c.lineCap = 'butt';
+    strokePath(c, [34, 26, 10, 50, 34, 74], SW * 1.15);
+    strokePath(c, [66, 26, 90, 50, 66, 74], SW * 1.15);
+    strokePath(c, [58, 16, 42, 84], SW * 1.1);
+  },
+  eye(c) {
+    c.fillStyle = ON; c.beginPath(); c.moveTo(4, 50); c.quadraticCurveTo(50, 4, 96, 50); c.quadraticCurveTo(50, 96, 4, 50); c.fill();
+    disc(c, 50, 50, 21, OFF); disc(c, 50, 50, 12, ON); disc(c, 55, 45, 4, OFF);
+  },
+  bolt(c) { poly(c, [60, 2, 20, 58, 46, 58, 36, 98, 80, 38, 54, 38, 66, 2], ON); },
+  phone(c) {
+    c.fillStyle = ON; rr(c, 27, 4, 46, 92, 8); c.fill();
+    c.fillStyle = OFF; c.fillRect(33, 16, 34, 60); c.fillRect(43, 9, 14, 3);
+    disc(c, 50, 86, 4.5, OFF);
+  },
+  lock(c) {
+    c.strokeStyle = ON; c.lineWidth = SW; c.beginPath(); c.arc(50, 40, 19, Math.PI, 0);
+    c.lineTo(69, 50); c.moveTo(31, 40); c.lineTo(31, 50); c.stroke();
+    c.fillStyle = ON; rr(c, 18, 48, 64, 44, 4); c.fill();
+    disc(c, 50, 64, 7, OFF); c.fillStyle = OFF; c.fillRect(46.5, 64, 7, 16);
+  },
+  chat(c) {
+    c.fillStyle = ON; rr(c, 6, 12, 88, 58, 10); c.fill();
+    poly(c, [22, 66, 18, 92, 46, 66], ON);
+    for (const x of [30, 50, 70]) disc(c, x, 41, 6.5, OFF);
+  },
+  search(c) {
+    c.strokeStyle = ON; c.lineWidth = SW * 1.15; c.beginPath(); c.arc(42, 42, 27, 0, Math.PI * 2); c.stroke();
+    c.lineCap = 'butt'; strokePath(c, [62, 62, 90, 90], SW * 1.8);
+  },
+  cursor(c) { poly(c, [26, 6, 26, 80, 43, 64, 56, 92, 70, 86, 57, 58, 80, 58], ON); },
+};
+
+const GRID = [
+  'camera', 'pencil', 'globe', 'truck', 'headphones',
+  'film', 'mountain', 'code', 'eye', 'bolt',
+  'phone', 'lock', 'chat', 'search', 'cursor',
+];
+const DIM = new Set(['lock']);
+const TARGET = { col: 3, row: 1 };
+
+// ---- UI layer --------------------------------------------------------------
+const uiCanvas = document.createElement('canvas');
+const ui = uiCanvas.getContext('2d');
+const uiTex = texture();
+let bloomA, bloomB, W, H, dpr;
+
+function drawUI() {
+  const w = innerWidth, h = innerHeight;
+  uiCanvas.width = W; uiCanvas.height = H;
+  ui.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ui.fillStyle = OFF; ui.fillRect(0, 0, w, h);
+
+  const C = Math.min(w * P.cellOfWidth, h * P.cellOfHeight);
+  const gap = C * P.gap, t = C * P.outline;
+  const gw = C * 5 + gap * 4, gh = C * 3 + gap * 2;
+  const x0 = (w - gw) / 2, y0 = (h - gh) / 2;
+  const cellX = i => x0 + i * (C + gap), cellY = j => y0 + j * (C + gap);
+
+  function drawCell(name, x, y) {
+    ui.globalAlpha = DIM.has(name) ? 0.38 : 1;
+    ui.fillStyle = ON;
+    ui.fillRect(x, y, C, t); ui.fillRect(x, y + C - t, C, t);
+    ui.fillRect(x, y + t, t, C - 2 * t); ui.fillRect(x + C - t, y + t, t, C - 2 * t);
+    const s = C * P.pictoBox / 100;
+    ui.save();
+    ui.translate(x + (C - 100 * s) / 2, y + (C - 100 * s) / 2); ui.scale(s, s);
+    ui.lineJoin = 'miter'; ui.lineCap = 'butt';
+    PICTOS[name](ui);
+    ui.restore();
+    ui.globalAlpha = 1;
+  }
+  GRID.forEach((name, k) => drawCell(name, cellX(k % 5), cellY(Math.floor(k / 5))));
+
+  // crosshair + reticle: every element gets a dark margin first, then the bright stroke.
+  // The lines stop at the targeted cell, which stays intact.
+  const tx = cellX(TARGET.col), ty = cellY(TARGET.row);
+  const cx = tx + C / 2, cy = ty + C / 2;
+  const L = C * P.line, K = C * P.knock;
+  const bt = C * P.bracket, arm = C * P.bracketArm, off = C * P.bracketOffset;
+  const bx = tx - off, by = ty - off, bs = C + off * 2;
+  const brackets = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([sx, sy]) => {
+    const px = bx + sx * bs, py = by + sy * bs, dx = sx ? -1 : 1, dy = sy ? -1 : 1;
+    return [[Math.min(px, px + dx * arm), sy ? py - bt : py, arm, bt], [sx ? px - bt : px, Math.min(py, py + dy * arm), bt, arm]];
+  }).flat();
+  const lines = [
+    [w * 0.027, cy - L / 2, tx - w * 0.027, L], [tx + C, cy - L / 2, w * 0.973 - tx - C, L],
+    [cx - L / 2, h * 0.015, L, ty - h * 0.015], [cx - L / 2, ty + C, L, h * 0.985 - ty - C],
+  ];
+
+  ui.fillStyle = OFF;
+  for (const [x, y, rw, rh] of [...lines, ...brackets]) ui.fillRect(x - K, y - K, rw + 2 * K, rh + 2 * K);
+  ui.fillStyle = ON;
+  for (const r of [...lines, ...brackets]) ui.fillRect(...r);
+  ui.fillStyle = OFF; ui.fillRect(tx, ty, C, C);
+  drawCell(GRID[TARGET.row * 5 + TARGET.col], tx, ty);
+
+  ui.font = `700 ${Math.round(C * P.label)}px "Handjet", monospace`;
+  ui.textBaseline = 'alphabetic';
+  const label = 'Archive index loaded. Awaiting selection ...';
+  const lx = bx + bs + C * 0.1, ly = cy - L / 2 - K - C * 0.08;
+  ui.lineJoin = 'round'; ui.lineWidth = K * 1.6; ui.strokeStyle = OFF; ui.strokeText(label, lx, ly);
+  ui.fillStyle = ON; ui.fillText(label, lx, ly);
+
+  gl.bindTexture(gl.TEXTURE_2D, uiTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, uiCanvas);
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  W = Math.round(innerWidth * dpr); H = Math.round(innerHeight * dpr);
+  canvas.width = W; canvas.height = H;
+  bloomA = target(W >> 1, H >> 1);
+  bloomB = target(W >> 1, H >> 1);
+  drawUI();
+}
+
+function blur(src, dst, dx, dy) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+  gl.viewport(0, 0, dst.w, dst.h);
+  gl.useProgram(blurProg.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src);
+  gl.uniform1i(blurProg.u.uTex, 0);
+  gl.uniform2f(blurProg.u.uDir, dx / dst.w, dy / dst.h);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function frame(now) {
+  blur(uiTex, bloomA, 2, 0); blur(bloomA.tex, bloomB, 0, 2);
+  blur(bloomB.tex, bloomA, 4, 0); blur(bloomA.tex, bloomB, 0, 4);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(finalProg.p);
+  const u = finalProg.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, uiTex); gl.uniform1i(u.uUI, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloomB.tex); gl.uniform1i(u.uBloom, 1);
+  gl.uniform2f(u.uRes, W, H);
+  gl.uniform1f(u.uTime, now / 1000);
+  gl.uniform1f(u.uShowUI, showUI ? 1 : 0);
+  gl.uniform1f(u.uWear, wear ? 1 : 0);
+  PALETTES[palette].stops.forEach((c, i) => gl.uniform3fv(u[`uC${i}`], hex(c)));
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  hud.style.display = showHud ? 'block' : 'none';
+  hud.textContent = `${PALETTES[palette].name} · wear ${wear ? 'on' : 'off'}\nC  colour   G  wear   U  UI   H  hide`;
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'c') { const keys = Object.keys(PALETTES); palette = keys[(keys.indexOf(palette) + 1) % keys.length]; }
+  if (k === 'g') wear = !wear;
+  if (k === 'u') showUI = !showUI;
+  if (k === 'h') showHud = !showHud;
+});
+addEventListener('resize', resize);
+
+Promise.all([document.fonts.load('700 40px "Handjet"'), document.fonts.load('12px "Share Tech Mono"')]).finally(() => {
+  resize();
+  requestAnimationFrame(frame);
+  window.__ready = true;
+});
+</script>
+</body>
+</html>
