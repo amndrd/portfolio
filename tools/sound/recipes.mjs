@@ -35,4 +35,21 @@ export const cues = {
     s = d.lowpass(d.highshelf(d.lowshelf(d.highpass(s, 32), 110, 2), 2000, -6), 6000);
     return [s];
   } },
+
+  // ---- grid ----------------------------------------------------------------------------------------
+  // the grid powering up: the first two seconds of a terminal start-up, tightened to the boot (1.6 s), with a
+  // grainy 900 / 445 Hz flicker for the reference's pulsing processing tone
+  boot: { build() {
+    const s = d.slice(src('System_Start_Up', { af: 'atempo=1.25' }), 0.12, 1.95);
+    const flicker = d.fade(cut('Flickering_Signal', 0.35, 1.15), 0.08, 0.3);
+    return [d.fade(d.highpass(d.mix([[s, 0], [d.highpass(flicker, 300), 0.15, -9]]), 45), 0.01, 0.6)];
+  } },
+  // one cell appearing: a dry digital click
+  cell: { build() {
+    return [['Scroll_Clicks', 0.090, 0.140], ['Scroll_Clicks', 0.200, 0.232], ['Scroll_Clicks', 0.232, 0.290],
+      ['Techy_Glide', 0.096, 0.150], ['Techy_Glide', 0.176, 0.236], ['Techy_Glide', 0.388, 0.440], ['Techy_Glide', 0.652, 0.700]]
+      .map(([k, a, b]) => clean(cut(k, a, b), 0.4, 150));
+  } },
+  // the thump under big elements appearing, three slightly different drops
+  thump: { build: () => [thump(), thump(0.92), thump(1.08)] },
 };
