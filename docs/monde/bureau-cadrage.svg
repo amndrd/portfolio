@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600" font-family="ui-monospace, Menlo, Consolas, monospace">
+  <title>Le bureau : croquis du plan principal en 16:9, avec les zones de l'interface</title>
+  <defs>
+    <radialGradient id="pool" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#e8e4d8" stop-opacity="0.32"/><stop offset="1" stop-color="#e8e4d8" stop-opacity="0"/></radialGradient>
+    <radialGradient id="lamp" cx="0.5" cy="0" r="1"><stop offset="0" stop-color="#ffd9a0" stop-opacity="0.45"/><stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#bfe3ff" stop-opacity="0.5"/><stop offset="1" stop-color="#bfe3ff" stop-opacity="0"/></radialGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="5"/></filter>
+    <clipPath id="frame"><rect x="0" y="0" width="960" height="540"/></clipPath>
+  </defs>
+  <rect width="960" height="600" fill="#0d0d0d"/>
+  <g clip-path="url(#frame)">
+    <rect width="960" height="540" fill="#05070c"/>
+    <!-- stars -->
+    <g fill="#e8e4d8" opacity="0.7">
+      <circle cx="330" cy="40" r="1"/><circle cx="420" cy="80" r="1.2"/><circle cx="520" cy="30" r="1"/><circle cx="600" cy="70" r="1.2"/>
+      <circle cx="380" cy="120" r="0.8"/><circle cx="560" cy="130" r="0.8"/><circle cx="470" cy="20" r="1"/><circle cx="650" cy="110" r="1"/>
+      <circle cx="300" cy="150" r="0.8"/><circle cx="700" cy="40" r="1"/>
+    </g>
+    <!-- glass structure -->
+    <g stroke="#1d2a38" stroke-width="2"><line x1="250" y1="0" x2="250" y2="330"/><line x1="480" y1="0" x2="480" y2="330"/><line x1="710" y1="0" x2="710" y2="330"/><line x1="160" y1="170" x2="800" y2="170"/></g>
+    <!-- background palms -->
+    <g fill="#0f2233" opacity="0.95">
+      <path d="M330,330 C320,250 300,210 260,190 C300,200 320,220 336,250 C340,200 360,170 400,160 C370,185 350,220 345,330 Z"/>
+      <path d="M640,330 C650,260 670,220 715,200 C680,215 660,240 648,270 C640,220 615,190 575,180 C610,205 628,240 632,330 Z"/>
+    </g>
+    <!-- floor with a light pool -->
+    <rect x="0" y="420" width="960" height="120" fill="#0b0b0b"/>
+    <ellipse cx="480" cy="440" rx="330" ry="70" fill="url(#pool)"/>
+    <!-- pillars -->
+    <rect x="256" y="0" width="28" height="430" fill="#141414"/><rect x="676" y="0" width="28" height="430" fill="#141414"/>
+    <rect x="260" y="250" width="20" height="26" fill="#3a3326"/>
+    <!-- lamp light cone -->
+    <path d="M372,196 L300,330 L470,330 Z" fill="url(#lamp)"/>
+    <!-- desk -->
+    <rect x="230" y="326" width="500" height="10" fill="#cfcac0"/>
+    <rect x="240" y="336" width="6" height="96" fill="#8a8a8a"/><rect x="716" y="336" width="6" height="96" fill="#8a8a8a"/>
+    <!-- drawer cabinet -->
+    <rect x="636" y="338" width="70" height="92" fill="#9c9a94"/>
+    <g stroke="#6d6b66" stroke-width="1.5"><line x1="636" y1="360" x2="706" y2="360"/><line x1="636" y1="383" x2="706" y2="383"/><line x1="636" y1="406" x2="706" y2="406"/></g>
+    <!-- plastic tower and boxes -->
+    <rect x="742" y="350" width="52" height="82" fill="#bdbab2"/><rect x="738" y="318" width="60" height="32" fill="#8a6a44"/><rect x="746" y="296" width="44" height="22" fill="#9a7a52"/>
+    <!-- books + label box -->
+    <rect x="246" y="300" width="56" height="26" fill="#6b5f4d"/><rect x="252" y="282" width="40" height="18" fill="#a88c62"/>
+    <!-- lamp -->
+    <g stroke="#1a1a1a" stroke-width="5" fill="none"><line x1="300" y1="326" x2="318" y2="170"/><line x1="318" y1="170" x2="372" y2="190"/></g>
+    <path d="M360,182 L388,186 L384,206 L362,202 Z" fill="#1a1a1a"/>
+    <!-- big monitor, off -->
+    <rect x="384" y="248" width="96" height="62" fill="#111317" stroke="#2a2d33" stroke-width="2"/><rect x="426" y="310" width="10" height="16" fill="#2a2d33"/>
+    <!-- the Mac -->
+    <ellipse cx="560" cy="282" rx="70" ry="54" fill="url(#glow)"/>
+    <rect x="530" y="244" width="62" height="82" rx="4" fill="#d8ccb0"/>
+    <rect x="538" y="252" width="46" height="36" rx="3" fill="#bfe3ff"/>
+    <rect x="552" y="300" width="22" height="3" fill="#8f8570"/>
+    <rect x="500" y="318" width="40" height="8" fill="#cfc4aa"/>
+    <!-- chair, empty -->
+    <path d="M436,206 L504,206 L510,312 L430,312 Z" fill="#2a2c30" opacity="0.92"/>
+    <rect x="448" y="186" width="44" height="18" rx="6" fill="#2a2c30"/>
+    <rect x="426" y="330" width="90" height="12" fill="#1c1d20"/>
+    <line x1="470" y1="342" x2="470" y2="398" stroke="#1c1d20" stroke-width="6"/>
+    <path d="M420,410 L520,410 M470,398 L430,414 M470,398 L512,414" stroke="#1c1d20" stroke-width="5"/>
+    <!-- floor fan -->
+    <circle cx="330" cy="392" r="34" fill="#cfcac0"/><circle cx="330" cy="392" r="26" fill="none" stroke="#8a8780" stroke-width="2"/>
+    <g stroke="#8a8780" stroke-width="1.2"><line x1="304" y1="392" x2="356" y2="392"/><line x1="330" y1="366" x2="330" y2="418"/></g>
+    <rect x="318" y="424" width="24" height="8" fill="#cfcac0"/>
+    <!-- foreground foliage, out of focus -->
+    <g filter="url(#blur)">
+      <path d="M-20,540 C40,420 80,300 200,240 C150,320 140,420 160,540 Z" fill="#14321c"/>
+      <path d="M-30,300 C40,260 120,250 210,280 C120,300 60,340 -30,380 Z" fill="#1d4527"/>
+      <path d="M0,120 C70,160 120,220 140,320 C90,260 40,220 -20,200 Z" fill="#163a20"/>
+      <path d="M980,540 C930,430 880,330 760,280 C820,360 830,450 800,540 Z" fill="#14321c"/>
+      <path d="M990,250 C910,230 830,250 760,300 C850,300 920,330 990,370 Z" fill="#1d4527"/>
+      <path d="M960,90 C900,140 860,210 850,300 C890,240 930,200 990,180 Z" fill="#163a20"/>
+    </g>
+  </g>
+
+  <!-- 2.39 guides and safe area -->
+  <g stroke="#9a968c" stroke-width="1" stroke-dasharray="5 5" fill="none">
+    <line x1="0" y1="69" x2="960" y2="69"/><line x1="0" y1="471" x2="960" y2="471"/>
+  </g>
+  <rect x="192" y="69" width="576" height="402" fill="none" stroke="#f0b45a" stroke-width="1" stroke-dasharray="2 4"/>
+  <!-- UI zones -->
+  <g fill="none" stroke="#e8e4d8" stroke-width="1">
+    <rect x="770" y="14" width="176" height="30"/><rect x="928" y="140" width="20" height="250"/><rect x="430" y="498" width="100" height="28"/>
+  </g>
+  <g fill="#e8e4d8" font-size="11">
+    <text x="780" y="34">&gt;_ Menu   Sound: On</text>
+    <text x="938" y="400" text-anchor="middle" font-size="10">5</text>
+    <text x="480" y="517" text-anchor="middle">scroll ↓</text>
+  </g>
+
+  <!-- annotations -->
+  <g font-size="11" fill="#e8e4d8">
+    <text x="12" y="562">Cadre 16:9. Pointillés gris : bandes cinéma 2,39 (option). Pointillés ambre : zone sûre, où le bureau doit rester sur tous les formats.</text>
+    <text x="12" y="582" fill="#9a968c">Feuilles floues devant · piliers · Mac au centre, l'écran le plus lumineux · grand écran éteint · flaque au sol.</text>
+  </g>
+</svg>
