@@ -129,6 +129,19 @@ function setInverted(v) {
   inverted = v;
   try { localStorage.setItem('portfolio.inverted', v ? '1' : '0'); } catch {}
 }
+// switching the colours flickers the screen into them: 3 frames in, 3 back, then in for good
+let flip = null;   // { at, to }
+function toggleScreen(f) {
+  if (flip) return false;
+  flip = { at: f, to: !inverted };
+  setInverted(!inverted);
+  Sound.play('cut', { gain: -10 }); Sound.play('thump', { gain: -8 });
+  return true;
+}
+function shownInverted(f) {
+  if (flip && f - flip.at >= 6) flip = null;
+  return flip ? (blinkOn(f - flip.at, 0) ? flip.to : !flip.to) : inverted;
+}
 
 let triggerAt = [], bootOffset = 0;
 let selection = null;      // { cell, start, from, to }
@@ -851,7 +864,7 @@ function drawScene(f) {
   else drawIndex(f);
   drawSoundButton(f);
   crt.upload(uiCanvas);
-  crt.render(f / FPS, { inverted, lift: fx.lift || 0, blank: fx.blank || 0 });
+  crt.render(f / FPS, { inverted: shownInverted(f), lift: fx.lift || 0, blank: fx.blank || 0 });
 }
 
 function resize() {
@@ -936,7 +949,7 @@ canvas.addEventListener('wheel', e => {
 addEventListener('keydown', e => {
   Sound.init();
   const k = e.key.toLowerCase();
-  if (k === 'i') setInverted(!inverted);
+  if (k === 'i') toggleScreen(frameNow);
   if (k === 'm') toggleMute();
   if (k === 'escape' && (launch ? homeReady(frameNow) : selection)) goHome(frameNow);
   if (!selection && !launch && bootDone(frameNow)) {
