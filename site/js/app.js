@@ -1,5 +1,5 @@
 // Portfolio: the whole flow on one canvas. Grid boot, crosshair selection, project panel,
-// launch sequence, detail page (placeholder). Timings measured on the reference at 60 fps;
+// launch sequence, detail page (placeholder), and a menu. Timings measured on the reference at 60 fps;
 // the prototypes in ../prototypes hold the measurements and the alternatives.
 // Keys: arrows + Enter pick a cell, Esc goes back, I inverts the colours, M mutes.
 // Needs pictos.js, grid.js, crt.js, projects.js, sound.js.
@@ -72,6 +72,8 @@ const L = {
   back: [300, 960, 220, 65], github: [1200, 920, 310, 110], launch: [1540, 920, 320, 110],
   home: [810, 640, 300, 90],
   mute: [1690, 38, 190, 60],   // sound button
+  menu: [1540, 38, 120, 60],   // menu button, left of it
+  term: [1360, 132, 520],      // the menu's console: x, y, width
 };
 
 // ---- easing + keyframe helpers ------------------------------------------------------------------
@@ -118,7 +120,7 @@ const recCanvas = document.createElement('canvas');   // off-screen pass that co
 const rec = recCanvas.getContext('2d');
 let ctx = ui, dpr = 1, w = 0, h = 0, u = 1, layout, capRatio = 0.6, ascii;
 
-// saved choices: inverted colours, and the look of the hovered cell
+// saved choices: inverted colours, and the look of the hovered cell (chosen in the menu)
 const HOVER_STYLES = ['negative', 'corners', 'lock', 'lift'];
 let inverted = false, hoverStyle = HOVER_STYLES[0];
 try {
@@ -128,6 +130,10 @@ try {
 function setInverted(v) {
   inverted = v;
   try { localStorage.setItem('portfolio.inverted', v ? '1' : '0'); } catch {}
+}
+function setHoverStyle(v) {
+  hoverStyle = v;
+  try { localStorage.setItem('portfolio.hover', v); } catch {}
 }
 // switching the colours flickers the screen into them: 3 frames in, 3 back, then in for good
 let flip = null;   // { at, to }
@@ -274,7 +280,7 @@ function drawCellAt(k, f) {
     case 'done': drawFrame(ctx, x, y, C, t); drawPicto(ctx, name, x, y, C); break;
   }
 }
-// The hovered cell, in one of four styles: negative (the cell fills from the bottom, its pictogram
+// The hovered cell, in the style chosen in the menu: negative (the cell fills from the bottom, its pictogram
 // turns dark), corners (brackets inside the frame), lock (the crosshair's brackets snap onto it) or lift (it rises
 // off a hard shadow). Its entry, type and title type in beside it while the other cells dim.
 const keyAt = (rel, keys) => keys[Math.max(0, Math.min(rel, keys.length - 1))];
@@ -726,15 +732,15 @@ function drawDetail(d) {
   if (d >= b.on) text('OR PRESS ESC', 960, 772, 15, { align: 'center', weight: 600 });
 }
 
-// ---- sound button (top-right) -------------------------------------------------------------------------------
-// After igloo.inc: an outline speaker and a "Sound: On / Off" label in a monospace. On hover, on each toggle and
-// whenever the button comes back, the label decodes: characters come in from the left, each one a few code
-// points off its letter, and count down to it while the icon dims. Hidden from the cut of the launch sequence
-// until the detail page.
+// ---- top-right buttons: menu and sound ----------------------------------------------------------------------
+// After igloo.inc: an outline icon and a label in a monospace ("Menu / Close", "Sound: On / Off"). On hover, on
+// each toggle and whenever the buttons come back, the label decodes: characters come in from the left, each one a
+// few code points off its letter, and count down to it while the icon dims. Hidden from the cut of the launch
+// sequence until the detail page.
 const DECODE = { reveal: 16, step: 2, dim: 6 };   // frames: every character in, per code point, icon dimmed
 const SOUND_SIZE = 21;                             // font size
 const newDecode = () => ({ start: -1e9, offs: new Array(10).fill(0) });
-const soundDecode = newDecode();
+const soundDecode = newDecode(), menuDecode = newDecode();
 let muteWasOn = false;
 function muteOn(f) {
   if (muteShown === null) return false;
@@ -770,6 +776,13 @@ function speakerIcon(x, cy, k, off) {
   }
   ctx.stroke();
 }
+// a prompt, >_
+function promptIcon(x, cy, k) {
+  ctx.beginPath();
+  ctx.moveTo(x, cy - k * 0.32); ctx.lineTo(x + k * 0.36, cy); ctx.lineTo(x, cy + k * 0.32);
+  ctx.moveTo(x + k * 0.5, cy + k * 0.36); ctx.lineTo(x + k, cy + k * 0.36);
+  ctx.stroke();
+}
 // icon + label; the block ends on the right of the box, sized for the longer label so the text never moves
 function drawLabel([x, y, bw, bh], str, longest, icon, d, f) {
   ctx.save();
@@ -785,14 +798,149 @@ function drawLabel([x, y, bw, bh], str, longest, icon, d, f) {
   ctx.fillText(decodeText(d, str, f), left + k * 1.12 + gap, cy + cap / 2);
   ctx.restore();
 }
-function drawSoundButton(f) {
+function drawTopButtons(f) {
   const on = muteOn(f);
-  if (on && !muteWasOn) startDecode(soundDecode, f);
+  if (on && !muteWasOn) { startDecode(soundDecode, f); startDecode(menuDecode, f); }
   muteWasOn = on;
   if (!muteVisible(f)) return;
-  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05;
-  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+  const K = layout.C * 0.05;
+  ctx.fillStyle = OFF;   // reads over the crosshair lines
+  for (const [x, y, bw, bh] of [L.menu, L.mute]) ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);
+  drawLabel(L.menu, menu.open ? 'Close' : 'Menu', 5, promptIcon, menuDecode, f);
   drawLabel(L.mute, Sound.muted ? 'Sound: Off' : 'Sound: On', 10, (x, cy, k) => speakerIcon(x, cy, k, Sound.muted), soundDecode, f);
+}
+
+// ---- menu: a console dropping down from the Menu button --------------------------------------------------
+// It types in like the launch log. An entry runs like a command: the prompt echoes it and its output types in
+// below. Closing backspaces everything away. While it is open, everything but the two buttons is out of reach.
+const LINKS = { email: '', github: 'https://github.com/amndrd', linkedin: '' };   // empty: shown as still to come
+const MENU = { open: 6, type: 5, run: 3, erase: 9, line: 44, col: 20 };   // typing starts after `open` frames; characters
+                                                                         // per frame; line height; value column (characters)
+const menu = { open: false, openAt: -1e9, closeAt: -1e9, sel: 0, cmd: null, boxes: [] };
+// run(f, dir) returns the command the prompt echoes and the lines it prints, or null when nothing is printed
+const openLink = (id, cmd) => () => {
+  if (!LINKS[id]) return { cmd, out: ['  (link to come)'] };
+  window.open(LINKS[id], '_blank', 'noopener'); Sound.play('button', { gain: -4 });
+  return { cmd, out: [] };
+};
+const MENU_ENTRIES = {
+  contact: { value: () => 'email', run: () => {
+    if (!LINKS.email) return { cmd: 'contact', out: ['  (address to come)'] };
+    navigator.clipboard?.writeText(LINKS.email).catch(() => {});
+    return { cmd: 'contact', out: [`  ${LINKS.email}`, '  copied to the clipboard'] };
+  } },
+  github: { value: () => '@amndrd', link: true, run: openLink('github', 'open github.com/amndrd') },
+  linkedin: { value: () => 'profile', link: true, run: openLink('linkedin', 'open linkedin') },
+  screen: { value: () => inverted ? 'light' : 'dark', run: f => toggleScreen(f) ? { cmd: `screen ${inverted ? 'light' : 'dark'}`, out: [] } : null },
+  hover: { value: () => hoverStyle, run: (f, dir = 1) => {
+    const n = HOVER_STYLES.length;
+    setHoverStyle(HOVER_STYLES[(HOVER_STYLES.indexOf(hoverStyle) + dir + n) % n]);
+    Sound.play('panel', { gain: -4 });
+    return { cmd: `hover ${hoverStyle}`, out: [] };
+  } },
+  // the grid powers up again (going home from a project does it too)
+  reboot: { value: () => 'grid', run: f => {
+    closeMenu(f, true);
+    if (selection || launch) goHome(f); else { resetBoot(f); hover = null; }
+    return null;
+  } },
+};
+const MENU_GROUPS = [['contact', 'github', 'linkedin'], ['screen', 'hover', 'reboot']];
+const MENU_ITEMS = MENU_GROUPS.flat();
+
+function openMenu(f) {
+  Object.assign(menu, { open: true, openAt: f, sel: 0, cmd: null });
+  hover = null;
+  startDecode(menuDecode, f);
+  Sound.play('select');
+}
+function closeMenu(f, quiet = false) {
+  if (!menu.open) return;
+  Object.assign(menu, { open: false, closeAt: f });
+  startDecode(menuDecode, f);
+  if (!quiet) Sound.play('back');
+  Sound.play('erase', { gain: -4 });
+}
+function runEntry(i, f, dir) {
+  menu.sel = i;
+  const r = MENU_ENTRIES[MENU_ITEMS[i]].run(f, dir);
+  if (r) menu.cmd = { ...r, at: f };
+}
+const menuRow = id => `  ${id} ${'.'.repeat(MENU.col - id.length - 2)} ${MENU_ENTRIES[id].value()}`;
+// the entries type in on open; the echoed command, its output and the next prompt (cmd) type in when run
+function menuLines() {
+  const lines = [{ s: '> menu' }];
+  MENU_GROUPS.forEach((g, i) => { if (i) lines.push({ s: '' }); for (const id of g) lines.push({ s: menuRow(id), id }); });
+  if (menu.cmd) lines.push({ s: `> ${menu.cmd.cmd}`, cmd: true }, ...menu.cmd.out.map(s => ({ s, cmd: true })));
+  lines.push({ s: '> ', prompt: true, cmd: !!menu.cmd });
+  return lines;
+}
+// characters shown: `entries` and `run` typed so far, `left` before the end once closing (from the top, so the
+// bottom goes first); each is spent line by line
+function menuBudget(f, lines) {
+  const total = lines.reduce((n, l) => n + l.s.length, 0);
+  return {
+    total,
+    entries: menu.open ? Math.floor((f - menu.openAt - MENU.open) * MENU.type) : Infinity,
+    run: menu.cmd ? Math.floor((f - menu.cmd.at) * MENU.run) : 0,
+    left: menu.open ? Infinity : total - (f - menu.closeAt) * MENU.erase,
+  };
+}
+// an arrow up and to the right, after external links
+function linkIcon(px, base, size) {
+  const k = size * 0.5, x0 = px + size * 0.4, y0 = base - size * 0.06;
+  ctx.lineWidth = size * 0.1; ctx.lineJoin = 'miter'; ctx.lineCap = 'butt'; ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x0 + k, y0 - k);
+  ctx.moveTo(x0 + k * 0.3, y0 - k); ctx.lineTo(x0 + k, y0 - k); ctx.lineTo(x0 + k, y0 - k * 0.3);
+  ctx.stroke();
+}
+function drawMenu(f) {
+  menu.boxes = [];
+  if (!muteVisible(f)) return;
+  const lines = menuLines(), b = menuBudget(f, lines), o = f - menu.openAt;
+  if (!menu.open && b.left <= -20) return;
+  const [x, y, W] = L.term, LH = MENU.line, H = lines.length * LH + 44, [mx, my, mw, mh] = L.menu;
+  // the screen dims behind; a line drops from the button, like the crosshair's
+  ctx.save(); ctx.globalAlpha = 0.6 * (menu.open ? clamp01(o / 6) : clamp01(b.left / b.total)); ctx.fillStyle = OFF; ctx.fillRect(0, 0, w, h); ctx.restore();
+  const t = layout.C * 0.036;
+  ctx.fillStyle = ON; ctx.fillRect(X(mx + mw / 2) - t / 2, Y(my + mh), t, Y(y - my - mh));
+  if (menu.open ? o >= 2 : b.left > -10) { ctx.fillStyle = OFF; ctx.fillRect(X(x), Y(y), X(W), Y(H)); box(x, y, W, H, t); }
+  const size = 22 * u;
+  ctx.save();
+  ctx.font = `600 ${size}px "JetBrains Mono", monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  let entries = b.entries, run = b.run, left = b.left;
+  lines.forEach((line, i) => {
+    const len = line.s.length, n = Math.min(len, Math.max(0, line.cmd ? run : entries), Math.max(0, left));
+    if (line.cmd) run -= len; else entries -= len;
+    left -= len;
+    const ly = y + 52 + i * LH, k = line.id ? MENU_ITEMS.indexOf(line.id) : -1, full = n === len;
+    if (k >= 0) menu.boxes[k] = [x + 14, ly - 32, W - 28, LH];
+    const sel = k >= 0 && menu.sel === k && menu.open && full;
+    if (sel) R(x + 14, ly - 32, W - 28, LH - 4);
+    ctx.fillStyle = ctx.strokeStyle = sel ? OFF : ON;
+    const part = line.s.slice(0, n), px = X(x + 30), pw = ctx.measureText(part).width;
+    if (part) ctx.fillText(part, px, Y(ly));
+    if (full && line.id && MENU_ENTRIES[line.id].link) linkIcon(px + pw, Y(ly), size);
+    if (line.prompt && full && menu.open && Math.floor(f / 20) % 2 === 0) ctx.fillRect(px + pw, Y(ly - 22), size * 0.6, size * 0.95);   // cursor
+  });
+  ctx.restore();
+}
+function menuTarget(px, py) {
+  if (inRect(px, py, L.menu)) return 'menu';
+  if (inRect(px, py, L.mute)) return 'mute';
+  const k = menu.boxes.findIndex(b => b && inRect(px, py, b));
+  return k >= 0 ? `item${k}` : 'outside';
+}
+function menuKey(e) {
+  const k = e.key, n = MENU_ITEMS.length, id = MENU_ITEMS[menu.sel];
+  if (k === 'ArrowUp' || k === 'ArrowDown') { menu.sel = (menu.sel + (k === 'ArrowUp' ? n - 1 : 1)) % n; Sound.play('hover-cell'); }
+  else if (k === 'ArrowLeft' || k === 'ArrowRight') { if (id === 'screen' || id === 'hover') runEntry(menu.sel, frameNow, k === 'ArrowLeft' ? -1 : 1); }
+  else if (k === 'Enter') runEntry(menu.sel, frameNow);
+  else if (k === 'Escape') closeMenu(frameNow);
+  else if (k.toLowerCase() === 'i') runEntry(MENU_ITEMS.indexOf('screen'), frameNow);
+  else if (k.toLowerCase() === 'm') toggleMute();
+  else return;
+  e.preventDefault();
 }
 
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
@@ -868,7 +1016,8 @@ function drawScene(f) {
     if (fx.phase === 'detail') drawDetail(fx.d);
   } else if (selection) drawSelection(f);
   else drawIndex(f);
-  drawSoundButton(f);
+  drawMenu(f);
+  drawTopButtons(f);
   crt.upload(uiCanvas);
   crt.render(f / FPS, { inverted: shownInverted(f), lift: fx.lift || 0, blank: fx.blank || 0 });
 }
@@ -900,6 +1049,8 @@ function cellAt(mx, my) {
 }
 function targetAt(e) {
   const px = e.clientX / w * 1920, py = e.clientY / h * 1080;
+  if (menu.open) return menuTarget(px, py);
+  if (muteVisible(frameNow) && inRect(px, py, L.menu)) return 'menu';
   if (muteVisible(frameNow) && inRect(px, py, L.mute)) return 'mute';
   if (launch) return homeReady(frameNow) && inRect(px, py, L.home) ? 'home' : null;
   if (selection) {
@@ -921,6 +1072,9 @@ canvas.addEventListener('pointerdown', e => {
   lastInput = performance.now();
   const target = targetAt(e);
   if (!target) return;
+  if (target === 'menu') { menu.open ? closeMenu(frameNow) : openMenu(frameNow); return; }
+  if (target === 'outside') { closeMenu(frameNow); return; }
+  if (target.startsWith('item')) { runEntry(Number(target.slice(4)), frameNow); return; }
   if (target === 'mute') { toggleMute(); return; }
   if (target.startsWith('cell')) { startSelection(Number(target.slice(4)), frameNow); canvas.style.cursor = 'default'; return; }
   if (target === 'screen') { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; return; }
@@ -938,12 +1092,14 @@ canvas.addEventListener('pointermove', e => {
   }
   const target = targetAt(e);
   const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
-  const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
+  const nextId = target && !target.startsWith('cell') && target !== 'screen' && target !== 'outside' ? target : null;
   if (nextHover !== null && nextHover !== hover) Sound.play('hover-cell');
   if (nextId !== null && nextId !== hoverId) Sound.play('hover');
   if (nextId === 'mute' && hoverId !== 'mute') startDecode(soundDecode, frameNow);
+  if (nextId === 'menu' && hoverId !== 'menu') startDecode(menuDecode, frameNow);
+  if (nextId && nextId.startsWith('item')) menu.sel = Number(nextId.slice(4));
   hover = nextHover; hoverId = nextId;
-  canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
+  canvas.style.cursor = target === 'screen' ? 'grab' : target && target !== 'outside' ? 'pointer' : 'default';
 });
 addEventListener('pointerup', () => { if (drag) { drag = null; canvas.style.cursor = 'grab'; } });
 canvas.addEventListener('pointerleave', () => { hover = null; hoverId = null; });
@@ -955,6 +1111,7 @@ canvas.addEventListener('wheel', e => {
 addEventListener('keydown', e => {
   Sound.init();
   const k = e.key.toLowerCase();
+  if (menu.open) { menuKey(e); return; }
   if (k === 'i') toggleScreen(frameNow);
   if (k === 'm') toggleMute();
   if (k === 'escape' && (launch ? homeReady(frameNow) : selection)) goHome(frameNow);
