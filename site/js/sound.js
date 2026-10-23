@@ -11,7 +11,7 @@ const Sound = (() => {
     room: { gain: -11, fadeIn: 2.5 },
     drone: { gain: -25, fadeIn: 0.25, fadeOut: 0.03 },
     boot: { gain: -4 },
-    cell: { gain: -15, detune: 250, voices: 6 },
+    cell: { gain: -25, detune: 200, voices: 6 },
     thump: { gain: -10, detune: 60, voices: 3 },
     hover: { gain: -25, detune: 120, voices: 1 },
     'hover-cell': { gain: -21, detune: 120, voices: 1 },

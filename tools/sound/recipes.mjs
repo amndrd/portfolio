@@ -44,11 +44,10 @@ export const cues = {
     const flicker = d.fade(cut('Flickering_Signal', 0.35, 1.15), 0.08, 0.3);
     return [d.fade(d.highpass(d.mix([[s, 0], [d.highpass(flicker, 300), 0.15, -9]]), 45), 0.01, 0.6)];
   } },
-  // one cell appearing: a dry digital click
+  // one cell appearing: a quiet tick, a digital click with its attack rounded and its top rolled off above 2.5 kHz
   cell: { build() {
-    return [['Scroll_Clicks', 0.090, 0.140], ['Scroll_Clicks', 0.200, 0.232], ['Scroll_Clicks', 0.232, 0.290],
-      ['Techy_Glide', 0.096, 0.150], ['Techy_Glide', 0.176, 0.236], ['Techy_Glide', 0.388, 0.440], ['Techy_Glide', 0.652, 0.700]]
-      .map(([k, a, b]) => clean(cut(k, a, b), 0.4, 150));
+    return [['Scroll_Clicks', 0.090, 0.140], ['Scroll_Clicks', 0.200, 0.232], ['Techy_Glide', 0.176, 0.236], ['Techy_Glide', 0.652, 0.700]]
+      .map(([k, a, b]) => d.lowpass(d.highpass(d.fade(cut(k, a, b), 0.003, (b - a) * 0.5), 150), 2500));
   } },
   // the thump under big elements appearing, three slightly different drops
   thump: { build: () => [thump(), thump(0.92), thump(1.08)] },

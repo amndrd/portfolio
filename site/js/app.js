@@ -705,15 +705,16 @@ function drawSoundButton(f) {
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
 const LABEL_LEN = 'Archive entry 00 located. Opening file ...'.length;
 const typed = (rel, start, rate, len) => rel >= start && rel < start + len / rate;
-// the grid powering up (the sound lasts as long as the boot), a click as each cell appears, and a thump
-// under every third one (every 12 frames), as often as on the reference
+// the grid powering up (the sound lasts as long as the boot), a quiet tick as each cell appears, and a thump
+// under the first, the middle and the last one
 function bootSfx(n) {
   const r = n - bootOffset;
   if (r === BOOT_START) Sound.play('boot');
   for (let k = 0; k < GRID.length; k++) {
     if (r - triggerAt[k] !== 0) continue;
     Sound.play('cell');
-    if ((triggerAt[k] - BOOT_START) / BOOT_STEP % 3 === 0) Sound.play('thump', { gain: -1 });
+    const i = (triggerAt[k] - BOOT_START) / BOOT_STEP;   // the cell's place in the boot order
+    if (i === 0 || i === 7 || i === GRID.length - 1) Sound.play('thump', { gain: -4 });
   }
 }
 function selectionSfx(rel) {
