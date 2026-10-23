@@ -1,4 +1,4 @@
-// End-to-end check of the site: boot, select a cell, panel, LAUNCH, terminal, detail page, HOME.
+// End-to-end check of the site: boot, select a cell, panel, LAUNCH, terminal, detail page, HOME, then the menu.
 // usage: node site-test.mjs [url] [out dir]
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -48,5 +48,25 @@ await click(540, 330);
 await until(() => window.__portfolio().panelReady);
 await page.keyboard.press('Escape');                          // Esc from the panel
 const esc = await state();
-console.log(JSON.stringify({ mutedOnce, unmuted, afterHome: back, afterEsc: esc, errors }));
+await until(() => window.__portfolio().bootDone);
+await click(1600, 68);                                        // menu
+await page.waitForTimeout(900);
+await shot('6-menu');
+const opened = (await state()).menu;
+for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+await page.keyboard.press('Enter');                           // screen: light
+await page.waitForTimeout(600);
+await shot('7-menu-clair');
+const light = (await state()).inverted;
+await page.keyboard.press('ArrowDown');
+await page.keyboard.press('Enter');                           // hover: next style
+const style = (await state()).hoverStyle;
+await page.keyboard.press('i');                               // back to dark
+await page.keyboard.press('Escape');
+await page.waitForTimeout(600);
+const closed = await state();
+await page.mouse.move(750, 540); await page.waitForTimeout(700);
+await shot('8-survol');
+const menuCheck = { opened, light, style, closed: !closed.menu, dark: !closed.inverted, hovered: (await state()).hovered };
+console.log(JSON.stringify({ mutedOnce, unmuted, afterHome: back, afterEsc: esc, menu: menuCheck, errors }));
 await browser.close();

@@ -1158,6 +1158,7 @@ window.__portfolio = () => ({
   frame: frameNow, bootDone: bootDone(frameNow), panelReady: !!panelReady(frameNow),
   launch: launch ? launchState(frameNow - launch.start).phase : null, homeReady: homeReady(frameNow),
   muted: Sound.muted, soundsPlayed: Sound.played, muteVisible: muteVisible(frameNow),
+  menu: menu.open, inverted, hoverStyle, hovered: hv.cell,
   selectionStart: selection ? selection.start : null, launchStart: launch ? launch.start : null,
 });
 
