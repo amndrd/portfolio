@@ -845,7 +845,8 @@ canvas.addEventListener('pointermove', e => {
   const target = targetAt(e);
   const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
   const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
-  if ((nextHover !== null && nextHover !== hover) || (nextId !== null && nextId !== hoverId)) Sound.play('hover');
+  if (nextHover !== null && nextHover !== hover) Sound.play('hover-cell');
+  if (nextId !== null && nextId !== hoverId) Sound.play('hover');
   if (nextId === 'mute' && hoverId !== 'mute') startDecode(frameNow);
   hover = nextHover; hoverId = nextId;
   canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
@@ -868,7 +869,7 @@ addEventListener('keydown', e => {
       const cur = hover ?? 7, col = cur % 5, row = Math.floor(cur / 5);
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       hover = Math.min(2, Math.max(0, row + d[1])) * 5 + Math.min(4, Math.max(0, col + d[0]));
-      Sound.play('hover');
+      Sound.play('hover-cell');
       e.preventDefault();
     }
     if (k === 'enter' && hover !== null) startSelection(hover, frameNow);

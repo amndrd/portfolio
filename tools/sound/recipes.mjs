@@ -54,8 +54,11 @@ export const cues = {
   thump: { build: () => [thump(), thump(0.92), thump(1.08)] },
 
   // ---- pointer ---------------------------------------------------------------------------------------
-  // a short chatter of bright scroll clicks (about 0.28 s), in the spirit of the igloo.inc hover
+  // over a button: a short chatter of bright scroll clicks (about 0.28 s), in the spirit of the igloo.inc hover
   hover: { build: () => [d.highpass(d.fade(cut('Scroll_Clicks', 0.085, 0.370), 0.001, 0.04), 300)] },
+  // over a cell: a soft tick, one scroll click with its attack rounded and its top rolled off
+  'hover-cell': { build: () => [[0.090, 0.140], [0.200, 0.232]].map(([a, b]) => d.lowpass(d.fade(cut('Scroll_Clicks', a, b), 0.004, 0.025), 3500)) },
+
 
   // ---- selection ----------------------------------------------------------------------------------------
   // the crosshair coming in: a soft low bloop (586 Hz) with its little hit

@@ -1,7 +1,7 @@
 // Interface sounds: recorded sounds edited by tools/sound/build.mjs into sounds/ (kept out of the repository,
 // so a fresh clone is simply silent), mixed and triggered here.
 //   loops:     room (the ambience, always on), drone (under the launch log)
-//   one-shots: boot, cell, thump, hover, select, travel, type, lock, vanish, move, tick, panel, row, button,
+//   one-shots: boot, cell, thump, hover (buttons), hover-cell, select, travel, type, lock, vanish, move, tick, panel, row, button,
 //              scan, launch, cut, erase, off, back, toggle
 // The files are decoded as soon as the page loads; audio itself can only start on a user gesture.
 
@@ -13,7 +13,8 @@ const Sound = (() => {
     boot: { gain: -4 },
     cell: { gain: -15, detune: 250, voices: 6 },
     thump: { gain: -10, detune: 60, voices: 3 },
-    hover: { gain: -16, detune: 120, voices: 1 },
+    hover: { gain: -25, detune: 120, voices: 1 },
+    'hover-cell': { gain: -21, detune: 120, voices: 1 },
     select: { gain: -10 },
     travel: { gain: -12 },
     type: { gain: -27, detune: 150, voices: 2 },
