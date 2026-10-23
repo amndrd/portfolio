@@ -733,22 +733,25 @@ function drawDetail(d) {
 // until the detail page.
 const DECODE = { reveal: 16, step: 2, dim: 6 };   // frames: every character in, per code point, icon dimmed
 const SOUND_SIZE = 21;                             // font size
-let decode = { start: -1e9, offs: new Array(10).fill(0) }, muteWasOn = false;
+const newDecode = () => ({ start: -1e9, offs: new Array(10).fill(0) });
+const soundDecode = newDecode();
+let muteWasOn = false;
 function muteOn(f) {
   if (muteShown === null) return false;
   return !launch || ['press', 'detail'].includes(launchState(f - launch.start).phase);
 }
 function muteVisible(f) { return muteOn(f) && blinkOn(f - muteShown, 0); }
-function startDecode(f) {
-  decode = { start: f, offs: decode.offs.map(() => (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 4))) };
+function startDecode(d, f) {
+  d.start = f;
+  d.offs = d.offs.map(() => (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 4)));
 }
-function decodedLabel(f) {
-  const str = Sound.muted ? 'Sound: Off' : 'Sound: On', n = str.length, rel = f - decode.start;
+function decodeText(d, str, f) {
+  const n = str.length, rel = f - d.start;
   let out = '';
   for (let i = 0; i < n; i++) {
     const at = DECODE.reveal * (1 - Math.sqrt(1 - i / n));   // eases out: the first characters come in fastest
     if (rel < at) break;
-    const off = decode.offs[i], left = Math.max(0, Math.abs(off) - Math.floor((rel - at) / DECODE.step));
+    const off = d.offs[i], left = Math.max(0, Math.abs(off) - Math.floor((rel - at) / DECODE.step));
     out += str[i] === ' ' ? ' ' : String.fromCharCode(str.charCodeAt(i) + Math.sign(off) * left);
   }
   return out;
@@ -767,26 +770,29 @@ function speakerIcon(x, cy, k, off) {
   }
   ctx.stroke();
 }
-function drawSoundButton(f) {
-  const on = muteOn(f);
-  if (on && !muteWasOn) startDecode(f);
-  muteWasOn = on;
-  if (!muteVisible(f)) return;
-  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05;
-  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+// icon + label; the block ends on the right of the box, sized for the longer label so the text never moves
+function drawLabel([x, y, bw, bh], str, longest, icon, d, f) {
   ctx.save();
   const size = SOUND_SIZE * u, cap = size * 0.73, k = cap * 1.75, gap = size * 0.75;
   ctx.font = `600 ${size}px "JetBrains Mono", monospace`;
   const cw = ctx.measureText('M').width;
-  // the block ends on the right of the box with the longer label, so the text never moves while it decodes
-  const left = X(x + bw) - (k * 1.12 + gap + cw * 10), cy = Y(y + bh / 2), rel = f - decode.start;
+  const left = X(x + bw) - (k * 1.12 + gap + cw * longest), cy = Y(y + bh / 2), rel = f - d.start;
   ctx.strokeStyle = ON; ctx.lineWidth = size * 0.1; ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
   ctx.globalAlpha = rel >= 0 && rel < DECODE.dim ? 0.35 : 1;
-  speakerIcon(left, cy, k, Sound.muted);
+  icon(left, cy, k);
   ctx.globalAlpha = 1;
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ON;
-  ctx.fillText(decodedLabel(f), left + k * 1.12 + gap, cy + cap / 2);
+  ctx.fillText(decodeText(d, str, f), left + k * 1.12 + gap, cy + cap / 2);
   ctx.restore();
+}
+function drawSoundButton(f) {
+  const on = muteOn(f);
+  if (on && !muteWasOn) startDecode(soundDecode, f);
+  muteWasOn = on;
+  if (!muteVisible(f)) return;
+  const [x, y, bw, bh] = L.mute, K = layout.C * 0.05;
+  ctx.fillStyle = OFF; ctx.fillRect(X(x) - K, Y(y) - K, X(bw) + 2 * K, Y(bh) + 2 * K);   // reads over the crosshair lines
+  drawLabel(L.mute, Sound.muted ? 'Sound: Off' : 'Sound: On', 10, (x, cy, k) => speakerIcon(x, cy, k, Sound.muted), soundDecode, f);
 }
 
 // ---- sound cues, fired once per frame of the timeline ----------------------------------------------------
@@ -907,7 +913,7 @@ function targetAt(e) {
 }
 function toggleMute() {
   Sound.setMuted(!Sound.muted);
-  startDecode(frameNow);
+  startDecode(soundDecode, frameNow);
   Sound.play('toggle');   // only heard when the sound comes back on
 }
 canvas.addEventListener('pointerdown', e => {
@@ -935,7 +941,7 @@ canvas.addEventListener('pointermove', e => {
   const nextId = target && !target.startsWith('cell') && target !== 'screen' ? target : null;
   if (nextHover !== null && nextHover !== hover) Sound.play('hover-cell');
   if (nextId !== null && nextId !== hoverId) Sound.play('hover');
-  if (nextId === 'mute' && hoverId !== 'mute') startDecode(frameNow);
+  if (nextId === 'mute' && hoverId !== 'mute') startDecode(soundDecode, frameNow);
   hover = nextHover; hoverId = nextId;
   canvas.style.cursor = target === 'screen' ? 'grab' : target ? 'pointer' : 'default';
 });
