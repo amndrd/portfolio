@@ -35,13 +35,14 @@ It writes `site/sounds/` (git-ignored too). The recipes are in `tools/sound/reci
 | BACK, HOME or Esc | Back to the grid |
 | LAUNCH or Enter | Start the launch sequence |
 | Sound button (top-right) or M | Mute / unmute: the label decodes again on hover and on each toggle |
-| I | Invert the colours (black on paper) |
+| Menu button (top-right) | A console drops down: contact, GitHub, LinkedIn, screen colours, hover style, reboot of the grid. Click an entry, or arrows + Enter (← → change a setting), Esc closes |
+| I | Invert the colours (black on paper): the screen flickers into them |
 
-The mute and invert choices are saved in the browser. Browsers block audio until the first click or key press, so the first boot of the grid is silent.
+The mute, colour and hover choices are saved in the browser. Browsers block audio until the first click or key press, so the first boot of the grid is silent.
 
 ## The flow
 
-1. **Boot**: cells boot one after another in random order, one every 4 frames at 60 fps. Corner brackets blink, the frame closes, then the pictogram fades in.
+1. **Boot**: cells boot one after another in random order, one every 4 frames at 60 fps. Corner brackets blink, the frame closes, then the pictogram fades in. A hovered cell turns negative (or, from the menu, shows corners, the crosshair's lock or a lift) and its entry, type and title type in beside it while the other cells dim.
 2. **Selection**: the crosshair fades in, travels to the cell on a fitted cubic-bezier, locks, and the cell tilts, flashes and inverts. The other cells vanish one per frame.
 3. **Panel**: the cell and the crosshair move to the top-left, the title types in, then rulers, frames, data blocks and lists light up on a fixed rhythm. The ASCII screen renders the project's design in real time.
 4. **Launch**: the button blinks, the panel text is backspaced away, a boot log generated from the project data types out, and the screen cuts to black.
@@ -91,7 +92,7 @@ The scripts drive the locally installed Google Chrome through Playwright.
 Content is placeholder: the titles are planned projects and the numbers are made up. Still to come:
 
 - the project detail page (real images and videos in colour);
-- a button bar (GitHub, sound, invert);
+- the contact address and the LinkedIn link in the menu (`LINKS` in `site/js/app.js`);
 - a mobile layout;
 - final pictograms.
 
