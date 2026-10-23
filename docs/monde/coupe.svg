@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000" font-family="ui-monospace, Menlo, Consolas, monospace">
+  <title>Coupe du monde 3D : on descend en scrollant, on bifurque en cliquant</title>
+  <defs>
+    <marker id="down" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f0b45a"/>
+    </marker>
+    <marker id="branch" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8fcf8f"/>
+    </marker>
+    <pattern id="empty" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#2c2c2c" stroke-width="3"/>
+    </pattern>
+  </defs>
+
+  <rect width="1000" height="1000" fill="#0d0d0d"/>
+
+  <!-- sky -->
+  <circle cx="80" cy="70" r="16" fill="#e8e4d8" opacity="0.85"/>
+  <g fill="#e8e4d8" opacity="0.6">
+    <circle cx="200" cy="40" r="1.5"/><circle cx="330" cy="75" r="1.2"/><circle cx="520" cy="35" r="1.5"/>
+    <circle cx="640" cy="90" r="1.2"/><circle cx="760" cy="50" r="1.5"/><circle cx="880" cy="110" r="1.2"/>
+    <circle cx="930" cy="40" r="1.5"/><circle cx="420" cy="120" r="1"/><circle cx="700" cy="160" r="1"/>
+  </g>
+  <text x="500" y="30" fill="#e8e4d8" font-size="16" text-anchor="middle" font-weight="700">COUPE DU MONDE</text>
+  <text x="500" y="52" fill="#9a968c" font-size="12" text-anchor="middle">on descend en scrollant, on bifurque en cliquant</text>
+
+  <!-- ground and underground -->
+  <rect x="0" y="700" width="1000" height="200" fill="#151515"/>
+  <line x1="0" y1="700" x2="1000" y2="700" stroke="#e8e4d8" stroke-width="2"/>
+
+  <!-- main building -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <rect x="120" y="190" width="340" height="510"/>
+    <!-- floor slabs -->
+    <line x1="120" y1="290" x2="460" y2="290"/><line x1="120" y1="370" x2="460" y2="370"/>
+    <line x1="120" y1="450" x2="460" y2="450"/><line x1="120" y1="530" x2="460" y2="530"/>
+    <line x1="120" y1="610" x2="460" y2="610"/>
+    <!-- stairwell wall -->
+    <line x1="370" y1="190" x2="370" y2="700"/>
+  </g>
+  <!-- empty flats -->
+  <rect x="122" y="292" width="246" height="76" fill="url(#empty)"/>
+  <rect x="122" y="452" width="246" height="76" fill="url(#empty)"/>
+  <rect x="122" y="532" width="246" height="76" fill="url(#empty)"/>
+  <!-- stairs: one flight per floor, alternating -->
+  <g stroke="#9a968c" stroke-width="1.5" fill="none">
+    <polyline points="378,288 452,212"/><polyline points="452,368 378,292"/><polyline points="378,448 452,372"/>
+    <polyline points="452,528 378,452"/><polyline points="378,608 452,532"/><polyline points="452,698 378,612"/>
+  </g>
+
+  <!-- roof: garden, water tank, antenna -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <rect x="300" y="150" width="50" height="40"/>
+    <line x1="420" y1="190" x2="420" y2="120"/><line x1="405" y1="135" x2="435" y2="135"/>
+  </g>
+  <g fill="#8fcf8f" opacity="0.8">
+    <circle cx="145" cy="180" r="10"/><circle cx="165" cy="176" r="13"/><circle cx="190" cy="181" r="9"/>
+    <circle cx="250" cy="179" r="11"/><circle cx="272" cy="183" r="7"/>
+  </g>
+
+  <!-- the desk room -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <rect x="200" y="248" width="90" height="8"/>
+    <line x1="208" y1="256" x2="208" y2="288"/><line x1="282" y1="256" x2="282" y2="288"/>
+    <rect x="232" y="226" width="26" height="22"/>
+    <line x1="140" y1="205" x2="140" y2="270"/>
+  </g>
+  <rect x="235" y="229" width="20" height="15" fill="#e8e4d8" opacity="0.5"/>
+  <g fill="#8fcf8f" opacity="0.8"><circle cx="330" cy="270" r="12"/><circle cx="345" cy="262" r="9"/></g>
+
+  <!-- flat on the 3rd floor: the workshop -->
+  <rect x="124" y="374" width="242" height="72" fill="none" stroke="#8fcf8f" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+  <!-- ground floor hall: mailboxes -->
+  <g stroke="#e8e4d8" stroke-width="1.5" fill="none">
+    <rect x="300" y="640" width="50" height="30"/>
+    <line x1="300" y1="650" x2="350" y2="650"/><line x1="300" y1="660" x2="350" y2="660"/><line x1="325" y1="640" x2="325" y2="670"/>
+  </g>
+
+  <!-- back wall: AC units on the facade above the courtyard -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <rect x="462" y="590" width="34" height="26"/><circle cx="479" cy="603" r="9"/>
+    <rect x="462" y="640" width="30" height="22"/>
+    <line x1="530" y1="700" x2="530" y2="590"/>
+  </g>
+  <circle cx="530" cy="586" r="5" fill="#f0b45a"/>
+
+  <!-- laundromat block -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <rect x="570" y="590" width="220" height="110"/>
+    <rect x="590" y="645" width="40" height="45"/><circle cx="610" cy="667" r="12"/>
+    <rect x="640" y="645" width="40" height="45"/><circle cx="660" cy="667" r="12"/>
+    <rect x="690" y="645" width="40" height="45"/><circle cx="710" cy="667" r="12"/>
+    <rect x="745" y="625" width="30" height="65"/>
+  </g>
+  <g fill="#8fcf8f" opacity="0.8"><circle cx="600" cy="582" r="9"/><circle cx="620" cy="584" r="7"/><circle cx="770" cy="583" r="8"/></g>
+
+  <!-- metro entrance and stairs -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <polyline points="815,700 815,690 870,690 870,700"/>
+    <polyline points="820,700 832,712 832,724 844,724 844,736 856,736 856,748 868,748 868,760"/>
+  </g>
+  <rect x="822" y="672" width="40" height="14" fill="#e8e4d8"/>
+  <text x="842" y="683" fill="#0d0d0d" font-size="10" text-anchor="middle" font-weight="700">METRO</text>
+
+  <!-- underground: platform, car, tunnel -->
+  <g stroke="#e8e4d8" stroke-width="2" fill="none">
+    <line x1="300" y1="860" x2="960" y2="860"/>
+    <rect x="420" y="790" width="380" height="60" rx="14"/>
+    <rect x="470" y="805" width="40" height="22"/><rect x="590" y="800" width="40" height="45"/>
+    <rect x="710" y="805" width="40" height="22"/>
+    <line x1="300" y1="780" x2="960" y2="780"/>
+  </g>
+  <g fill="#8fcf8f" opacity="0.7"><circle cx="330" cy="784" r="6"/><circle cx="345" cy="786" r="4"/><circle cx="880" cy="784" r="5"/></g>
+
+  <!-- floor numbers -->
+  <g fill="#9a968c" font-size="13" text-anchor="end">
+    <text x="108" y="175">R</text><text x="108" y="245">5</text><text x="108" y="335">4</text>
+    <text x="108" y="415">3</text><text x="108" y="495">2</text><text x="108" y="575">1</text>
+    <text x="108" y="660">0</text><text x="108" y="830">-1</text>
+  </g>
+
+  <!-- the spine: scroll path -->
+  <path d="M265,262 L415,262 L415,660 L515,660 L680,660 L805,660 L842,692 L842,790 L640,820"
+        fill="none" stroke="#f0b45a" stroke-width="3" stroke-dasharray="1 0" marker-end="url(#down)" opacity="0.95"/>
+  <!-- stops -->
+  <g font-size="11" font-weight="700" text-anchor="middle">
+    <g fill="#f0b45a"><circle cx="265" cy="262" r="11"/><circle cx="415" cy="330" r="11"/><circle cx="415" cy="410" r="11"/>
+      <circle cx="415" cy="490" r="11"/><circle cx="415" cy="570" r="11"/><circle cx="415" cy="660" r="11"/>
+      <circle cx="515" cy="660" r="11"/><circle cx="680" cy="660" r="11"/><circle cx="842" cy="790" r="11"/><circle cx="640" cy="820" r="11"/></g>
+    <g fill="#0d0d0d"><text x="265" y="266">1</text><text x="415" y="334">2</text><text x="415" y="414">3</text>
+      <text x="415" y="494">4</text><text x="415" y="574">5</text><text x="415" y="664">6</text>
+      <text x="515" y="664">7</text><text x="680" y="664">8</text><text x="842" y="794">9</text><text x="640" y="824">10</text></g>
+  </g>
+
+  <!-- branches: click -->
+  <g stroke="#8fcf8f" stroke-width="2" stroke-dasharray="6 4" fill="none">
+    <path d="M150,240 L150,200" marker-end="url(#branch)"/>
+    <path d="M404,410 L300,410" marker-end="url(#branch)"/>
+    <path d="M800,820 L950,820" marker-end="url(#branch)"/>
+  </g>
+
+  <!-- labels -->
+  <g fill="#e8e4d8" font-size="12">
+    <text x="130" y="140" font-weight="700" fill="#8fcf8f">B1 · LE TOIT</text>
+    <text x="130" y="154" fill="#8fcf8f" font-size="10">à propos</text>
+    <text x="160" y="212" font-weight="700">S1 · LE BUREAU</text>
+    <text x="160" y="226" font-size="10" fill="#9a968c">accueil, l'ordinateur</text>
+    <text x="134" y="398" font-weight="700" fill="#8fcf8f">B2 · L'ATELIER</text>
+    <text x="134" y="412" font-size="10" fill="#8fcf8f">porte entrouverte</text>
+    <text x="134" y="634" font-weight="700">HALL</text>
+    <text x="134" y="648" font-size="10" fill="#9a968c">boîtes aux lettres : CV</text>
+    <text x="480" y="320" font-weight="700">S2 · L'ESCALIER</text>
+    <text x="480" y="334" font-size="10" fill="#9a968c">un palier par étape</text>
+    <text x="480" y="348" font-size="10" fill="#9a968c">du parcours</text>
+    <text x="470" y="560" font-weight="700">S3 · LE MUR</text>
+    <text x="470" y="574" font-size="10" fill="#9a968c">contact, réseaux</text>
+    <text x="580" y="610" font-weight="700">S4 · LA LAVERIE</text>
+    <text x="580" y="624" font-size="10" fill="#9a968c">la galerie des travaux</text>
+    <text x="310" y="770" font-weight="700">S5 · LE MÉTRO</text>
+    <text x="430" y="770" font-size="10" fill="#9a968c">le quai, puis la rame : la fin</text>
+    <text x="856" y="806" font-weight="700" fill="#8fcf8f">B3 · LA RAME PART</text>
+  </g>
+
+  <!-- legend -->
+  <g font-size="12">
+    <line x1="60" y1="935" x2="110" y2="935" stroke="#f0b45a" stroke-width="3"/>
+    <text x="122" y="939" fill="#e8e4d8">scroll : la descente, d'arrêt en arrêt</text>
+    <circle cx="460" cy="935" r="9" fill="#f0b45a"/><text x="460" y="939" fill="#0d0d0d" font-size="10" font-weight="700" text-anchor="middle">1</text>
+    <text x="478" y="939" fill="#e8e4d8">arrêt</text>
+    <line x1="560" y1="935" x2="610" y2="935" stroke="#8fcf8f" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="622" y="939" fill="#e8e4d8">clic : un lieu à part</text>
+    <rect x="800" y="926" width="24" height="18" fill="url(#empty)" stroke="#2c2c2c"/>
+    <text x="834" y="939" fill="#e8e4d8">vide</text>
+    <text x="500" y="975" fill="#9a968c" font-size="11" text-anchor="middle">un immeuble de 5 étages ; la nature a repris les lieux ; personne</text>
+  </g>
+</svg>
