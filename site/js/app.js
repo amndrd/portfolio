@@ -994,7 +994,14 @@ function launchSfx(rel) {
   if (d === DETAIL.title) Sound.play('thump');
   if (d === DETAIL.button.dim[0] || d === DETAIL.button.on) Sound.play('button');
 }
+// a key click every other frame while the menu types in
+function menuSfx(n) {
+  if (!menu.open || n % 2) return;
+  const lines = menuLines(), b = menuBudget(n, lines), sum = cmd => lines.filter(l => !!l.cmd === cmd).reduce((a, l) => a + l.s.length, 0);
+  if ((b.entries > 0 && b.entries < sum(false)) || (menu.cmd && b.run > 0 && b.run < sum(true))) Sound.play('type', { gain: 3 });
+}
 function sfxAt(n) {
+  menuSfx(n);
   if (n === muteShown) Sound.play('panel', { gain: -4 });
   if (launch) launchSfx(n - launch.start);
   else if (selection) selectionSfx(n - selection.start);
@@ -1094,7 +1101,8 @@ canvas.addEventListener('pointermove', e => {
   const nextHover = target && target.startsWith('cell') ? Number(target.slice(4)) : null;
   const nextId = target && !target.startsWith('cell') && target !== 'screen' && target !== 'outside' ? target : null;
   if (nextHover !== null && nextHover !== hover) Sound.play('hover-cell');
-  if (nextId !== null && nextId !== hoverId) Sound.play('hover');
+  // the menu's entries get the cells' soft tick: the cursor sweeps over them quickly
+  if (nextId !== null && nextId !== hoverId) Sound.play(nextId.startsWith('item') ? 'hover-cell' : 'hover');
   if (nextId === 'mute' && hoverId !== 'mute') startDecode(soundDecode, frameNow);
   if (nextId === 'menu' && hoverId !== 'menu') startDecode(menuDecode, frameNow);
   if (nextId && nextId.startsWith('item')) menu.sel = Number(nextId.slice(4));
