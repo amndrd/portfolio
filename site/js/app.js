@@ -21,6 +21,14 @@ const XH = {
   line: 0.068, knock: 0.05, bracket: 0.07, bracketArm: 0.35, bracketOffset: 0.15, label: 0.15,
 };
 
+// ---- hovered cell (frames after the cursor arrives, or leaves) ----------------------------
+const HOVER = {
+  fill: [0.3, 0.62, 0.86, 1], drain: [0.6, 0.25],    // negative: level of the fill rising inside the frame
+  lockZoom: [1.45, 1.25, 1.12, 1.04, 0.985, 1], lockRot: [8, 5, 3, 1.2, 0, 0], lockAlpha: [0.4, 0.8, 1],
+  up: [0.35, 0.7, 0.9, 1], down: [0.55, 0.2], lift: 0.1,   // lift: shadow offset, in cells
+  dim: 0.65, labelTop: 3, labelTitle: 2.5,            // the other cells dim; label characters per frame
+};
+
 // ---- click (frames after the click) ---------------------------------------------------
 const ROT = [9.9, 9.8, 9.3, 9.2, 8.7, 8.2, 7.4, 6.7, 5.9, 5.1, 4.2, 3.3, 2.3, 1.6, 0.8, 0, 0,
              -0.9, -1.5, -2.1, -2.6, -3.1, -3.4, -3.6, -3.7, -3.7, -3.7, -3.6, -3.4,
@@ -110,8 +118,13 @@ const recCanvas = document.createElement('canvas');   // off-screen pass that co
 const rec = recCanvas.getContext('2d');
 let ctx = ui, dpr = 1, w = 0, h = 0, u = 1, layout, capRatio = 0.6, ascii;
 
-let inverted = false;
-try { inverted = localStorage.getItem('portfolio.inverted') === '1'; } catch {}
+// saved choices: inverted colours, and the look of the hovered cell
+const HOVER_STYLES = ['negative', 'corners', 'lock', 'lift'];
+let inverted = false, hoverStyle = HOVER_STYLES[0];
+try {
+  inverted = localStorage.getItem('portfolio.inverted') === '1';
+  hoverStyle = HOVER_STYLES.find(s => s === localStorage.getItem('portfolio.hover')) || hoverStyle;
+} catch {}
 function setInverted(v) {
   inverted = v;
   try { localStorage.setItem('portfolio.inverted', v ? '1' : '0'); } catch {}
@@ -165,7 +178,7 @@ function startSelection(cell, f) {
   let from = [XH.start[0] * w, XH.start[1] * h];
   // too close to the entry point: come in from the mirrored side instead
   if (Math.hypot(from[0] - to[0], from[1] - to[1]) < w * 0.16) from = [(1 - XH.start[0]) * w, XH.start[1] * h];
-  selection = { cell, start: f, from, to };
+  selection = { cell, start: f, from, to, dim: hv.focus };   // the other cells stay dimmed until they vanish
   hover = null; hoverId = null;
   resetCam();
   Sound.play('select');
@@ -248,12 +261,70 @@ function drawCellAt(k, f) {
     case 'done': drawFrame(ctx, x, y, C, t); drawPicto(ctx, name, x, y, C); break;
   }
 }
+// The hovered cell, in one of four styles: negative (the cell fills from the bottom, its pictogram
+// turns dark), corners (brackets inside the frame), lock (the crosshair's brackets snap onto it) or lift (it rises
+// off a hard shadow). Its entry, type and title type in beside it while the other cells dim.
+const keyAt = (rel, keys) => keys[Math.max(0, Math.min(rel, keys.length - 1))];
+const hv = { cell: null, at: -1e9, last: null, leftAt: -1e9, focus: 0, frame: -1 };
+function negativeCell(k, level) {
+  const { C, t } = layout, [x, y] = cellBox(k), i = t * 2, ih = (C - 2 * i) * level;
+  drawFrame(ctx, x, y, C, t);
+  ctx.fillStyle = ON; ctx.fillRect(x + i, y + C - i - ih, C - 2 * i, ih);   // a dark ring between frame and fill
+  drawPictoInverted(ctx, GRID[k], x, y, C);   // inverted where the fill is, as usual elsewhere
+}
+function liftedCell(k, p) {
+  const { C, t } = layout, [x, y] = cellBox(k), d = C * HOVER.lift * p, cx = x - d / 2, cy = y - d / 2;
+  ctx.fillStyle = ON; ctx.fillRect(x + d / 2, y + d / 2, C, C);
+  ctx.fillStyle = OFF; ctx.fillRect(cx, cy, C, C);
+  drawFrame(ctx, cx, cy, C, t); drawPicto(ctx, GRID[k], cx, cy, C);
+}
+function lockOn(k, rel) {
+  const { C } = layout, [x, y] = cellBox(k), cx = x + C / 2, cy = y + C / 2, z = keyAt(rel, HOVER.lockZoom);
+  ctx.save(); ctx.globalAlpha = keyAt(rel, HOVER.lockAlpha); ctx.fillStyle = ON;
+  ctx.translate(cx, cy); ctx.rotate(keyAt(rel, HOVER.lockRot) * Math.PI / 180); ctx.scale(z, z); ctx.translate(-cx, -cy);
+  for (const r of reticleRects(cx, cy)) ctx.fillRect(...r);
+  ctx.restore();
+}
+// two lines beside the cell, on the right or, without room, on the left; outlined in black like the crosshair's label
+function hoverLabel(k, rel) {
+  const { C } = layout, [x, y] = cellBox(k), e = ENTRIES[k], cy = y + C / 2, off = C * (XH.bracketOffset + 0.12);
+  const lines = [[`ENTRY ${entryId(k)}   ${e.type}`, Math.round(C * 0.13), cy - C * 0.14, rel * HOVER.labelTop],
+    [e.title, Math.round(C * 0.24), cy + C * 0.15, (rel - 3) * HOVER.labelTitle]];
+  ctx.save();
+  ctx.font = `700 ${lines[1][1]}px "Handjet", monospace`;
+  const right = x + C + off + ctx.measureText(e.title).width < w * 0.98, lx = right ? x + C + off : x - off;
+  ctx.textAlign = right ? 'left' : 'right'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
+  ctx.lineWidth = C * XH.knock * 1.6; ctx.strokeStyle = OFF; ctx.fillStyle = ON;
+  for (const [str, size, ly, typed] of lines) {
+    const part = str.slice(0, Math.max(0, Math.floor(typed) + 1));
+    ctx.font = `700 ${size}px "Handjet", monospace`;
+    ctx.strokeText(part, lx, ly); ctx.fillText(part, lx, ly);
+  }
+  ctx.restore();
+}
 function drawIndex(f) {
-  const { C, t } = layout;
+  const { C, t } = layout, cur = bootDone(f) ? hover : null;
+  if (cur !== hv.cell) {
+    if (hv.cell !== null) { hv.last = hv.cell; hv.leftAt = f; }
+    hv.cell = cur; hv.at = f;
+  }
+  if (!bootDone(f)) hv.last = null;
+  const rel = f - hv.at, out = f - hv.leftAt, leaving = k => k === hv.last && k !== hv.cell;
+  if (f !== hv.frame) { hv.frame = f; hv.focus += ((hv.cell !== null ? 1 : 0) - hv.focus) * 0.3; }
   GRID.forEach((name, k) => {
-    drawCellAt(k, f);
-    if (hover === k && bootDone(f)) { const [x, y] = cellBox(k); drawBootBrackets(ctx, x, y, C, t); }
+    ctx.save();
+    if (k !== hv.cell) ctx.globalAlpha = 1 - HOVER.dim * hv.focus;
+    if (hoverStyle === 'negative' && k === hv.cell) negativeCell(k, keyAt(rel, HOVER.fill));
+    else if (hoverStyle === 'negative' && leaving(k) && out < HOVER.drain.length) negativeCell(k, HOVER.drain[out]);
+    else if (hoverStyle === 'lift' && k === hv.cell) liftedCell(k, keyAt(rel, HOVER.up));
+    else if (hoverStyle === 'lift' && leaving(k) && out < HOVER.down.length) liftedCell(k, HOVER.down[out]);
+    else drawCellAt(k, f);
+    ctx.restore();
   });
+  if (hv.cell === null) return;
+  if (hoverStyle === 'corners') { const [x, y] = cellBox(hv.cell); drawBootBrackets(ctx, x, y, C, t); }
+  if (hoverStyle === 'lock') lockOn(hv.cell, rel);
+  hoverLabel(hv.cell, rel);
 }
 
 // Targeted cell, centred on (cx, cy), opaque. rel = frames after the click:
@@ -298,7 +369,10 @@ function drawSelection(f) {
     if (k === sel.cell) return;
     const gone = crel >= XH.vanishDelay + order;
     order++;
-    if (!gone) drawCellAt(k, f);
+    if (gone) return;
+    ctx.save(); ctx.globalAlpha = 1 - HOVER.dim * sel.dim;
+    drawCellAt(k, f);
+    ctx.restore();
   });
 
   // the crosshair travels to the cell; the cell stays in its slot until the move, then both travel
