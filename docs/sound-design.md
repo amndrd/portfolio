@@ -16,6 +16,7 @@ Chaque étape de l'interface a son son. Ce sont des effets de bibliothèque coup
   - la disparition des cases est une cascade de 14 clics, un par image, comme les cases ;
   - le trajet du viseur (0,52 s) et le déplacement de la case (0,68 s) sont compressés à la durée exacte.
 - **Rien ne se répète à l'identique.** Plusieurs variantes par son (jamais deux fois la même d'affilée), une petite variation de hauteur aléatoire, et un nombre de voix limité : un nouveau survol coupe le précédent, la frappe ne dépasse jamais 2 voix.
+- **Choix à l'écoute.** Le survol et l'apparition des cases ont été choisis parmi trois options écoutées en situation (page d'écoute temporaire) : survol des boutons gardé mais baissé, tic doux sur les cases, démarrage discret avec trois coups graves seulement.
 - **Une seule source de vérité.** Tout le montage est décrit en code dans `tools/sound/recipes.mjs` (découpes, fondus, filtres, hauteur, glissandos, superpositions). Il se rejoue à l'identique avec `node tools/sound/build.mjs`. Les niveaux de mixage sont en tête de `site/js/sound.js`.
 
 ## Les sons
@@ -24,9 +25,10 @@ Chaque étape de l'interface a son son. Ce sont des effets de bibliothèque coup
 |---|---|---|---|
 | `room` | fond permanent | morceau d'ambiance (drone sombre) | boucle de 111,5 s sans couture (fondu enchaîné de 4 s), montées atténuées, aigus coupés au-dessus de 2 kHz. Étouffé quand un projet est ouvert, presque éteint au lancement |
 | `boot` | allumage de la grille | System Start Up Terminal On, Flickering Signal | 1,8 s du démarrage, accéléré ×1,25 ; scintillement 900 / 445 Hz en dessous, comme la boucle palpitante de la référence |
-| `cell` | chaque case (une toutes les 67 ms) | Scroll Clicks, Data Compute Techy Glide | 7 micro-clics de 30 à 60 ms |
-| `thump` | sous les gros éléments | Notification Beep (note basse à 128 Hz) | glissando 200 → 55 Hz en 70 ms, la courbe des coups de la référence ; 3 variantes. Une case sur trois, l'onglet, BACK, les blocs, LAUNCH, la page de détail |
-| `hover` | survol des cases, boutons et textes | Scroll Clicks | rafale de 5 clics brillants (0,28 s), dans l'esprit d'igloo.inc |
+| `cell` | chaque case (une toutes les 67 ms) | Scroll Clicks, Data Compute Techy Glide | 4 tics discrets : micro-clics à l'attaque arrondie, coupés au-dessus de 2,5 kHz, joués bas (−25 dB) |
+| `thump` | sous les gros éléments | Notification Beep (note basse à 128 Hz) | glissando 200 → 55 Hz en 70 ms, la courbe des coups de la référence ; 3 variantes. Première, 8ᵉ et dernière case du démarrage, l'onglet, BACK, les blocs, LAUNCH, la page de détail |
+| `hover` | survol des boutons | Scroll Clicks | rafale de 5 clics brillants (0,28 s), dans l'esprit d'igloo.inc, discrète (−25 dB) |
+| `hover-cell` | survol des cases (souris ou flèches) | Scroll Clicks | un seul clic, attaque arrondie, aigus coupés au-dessus de 3,5 kHz |
 | `select` | arrivée du viseur | Incoming Droplet | le « bloop » grave à 586 Hz et son petit impact |
 | `travel` | trajet du viseur (0,52 s) | Sci Craft Cybernetic Scan, Cybernetic Device Scan | bourdon de visée accéléré ×1,8, raies tonales aiguës par-dessus |
 | `lock` | clic sur la case | Alien Technology, Cybernetic Scan, Menu Select Retro Bleep | impact sub-grave et accord tenu, accents de verrouillage, attaque rétro, coup grave, +4 dB sous 100 Hz |
@@ -46,6 +48,8 @@ Chaque étape de l'interface a son son. Ce sont des effets de bibliothèque coup
 | `back` | BACK, HOME | Incoming Droplet | le « bloop » de sélection, un cran plus bas : son miroir |
 | `toggle` | le son revient | 8 Bit UI Minimal Beep | deux mini-bips qui montent |
 
+Le menu réutilise ces sons : `select` à l'ouverture, `type` pendant que la console s'écrit, `back` et `erase` à la fermeture, `hover-cell` au survol de ses lignes (le curseur les balaie vite), `cut` et `thump` au changement de couleur, `panel` au changement de style de survol, `button` à l'ouverture d'un lien.
+
 Sources non retenues : Streaming Logos Deep Impact Sparkling (sa queue grave est trop longue pour l'interface), Gaming Keyboards Typing (une frappe mécanique, alors que la référence est numérique) et la seconde copie de System Start Up (renommée « CRT Screen Electromagnetic Noise »).
 
 ## Mixage
@@ -55,14 +59,14 @@ Sources non retenues : Streaming Logos Deep Impact Sparkling (sa queue grave est
 
 | Moment | Écart avec la référence |
 |---|---|
-| Démarrage | −0,5 dB |
-| Trajet du viseur | +1,5 dB |
+| Démarrage | −1,6 dB (plus doux que la référence, par choix) |
+| Trajet du viseur | +2,3 dB |
 | Clic | +1,1 dB |
 | Disparition et déplacement | −2,7 dB |
 | Construction du panneau | +1,7 dB |
 | Panneau au repos | −2,8 dB |
-| LAUNCH | +3,9 dB |
-| Journal | +1,6 dB |
+| LAUNCH | +2,8 dB |
+| Journal | +2,3 dB |
 | Noir | +1,7 dB |
 
 - **Écarts volontaires.** Deux moments restent plus brillants que la référence : l'attaque de LAUNCH, pour rester lisible sur de petits haut-parleurs, et la frappe de la description, qui n'existe pas dans la référence.
