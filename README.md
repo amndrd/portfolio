@@ -92,7 +92,6 @@ The scripts drive the locally installed Google Chrome through Playwright.
 Content is placeholder: the titles are planned projects and the numbers are made up. Still to come:
 
 - a 3D home made in Blender, a building to scroll down from the developer's desk to the subway, with this portfolio running on the desk's computer (plan: [docs/monde/plan.md](docs/monde/plan.md));
-
 - the project detail page (real images and videos in colour);
 - the contact address and the LinkedIn link in the menu (`LINKS` in `site/js/app.js`);
 - a mobile layout;
