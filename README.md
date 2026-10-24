@@ -87,6 +87,16 @@ node sound/check.mjs <reference>      # the scripted run against a reference cli
 
 The scripts drive the locally installed Google Chrome through Playwright.
 
+## Repository layout
+
+```
+site/        the static site (index.html and js/)
+prototypes/  numbered step-by-step prototypes of each screen
+tools/       capture, recording and sound-build scripts (Node)
+blender/     the 3D desk scene
+docs/        sound design notes, the 3D world plan and screenshots
+```
+
 ## Status
 
 Content is placeholder: the titles are planned projects and the numbers are made up. Still to come:
