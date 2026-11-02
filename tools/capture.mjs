@@ -1,5 +1,6 @@
 // Screenshots of a prototype page.
 // usage: node capture.mjs <html file> <out dir> <name>=<query> [<name>=<query> ...] [--size=1920x1080] [--wait=1500]
+// example: node capture.mjs ../prototypes/10-vue-unique/index.html ../captures/10 grid=
 import { chromium } from 'playwright';
 import { pathToFileURL } from 'node:url';
 import { mkdirSync } from 'node:fs';
