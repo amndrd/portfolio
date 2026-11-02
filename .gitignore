@@ -6,3 +6,4 @@ sounds-src/
 site/sounds/
 *.blend1
 Thumbs.db
+npm-debug.log*
