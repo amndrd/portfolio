@@ -80,6 +80,7 @@ npm install
 node site-test.mjs                    # end-to-end run of the whole flow (site served on :8080)
 node capture.mjs <page> <out> name=query ...   # screenshots of a prototype
 node sequence.mjs <page> <out> <query> <from> <to>   # frame-by-frame export
+node drag-test.mjs                    # drag on the ASCII screen, before / after screenshots
 node record-audio.mjs                 # records the site's audio over a scripted run
 node sound-button-test.mjs            # screenshots of the sound button states
 node sound-test.mjs                   # sounds load and play, hover never stacks, mute, silent without files
