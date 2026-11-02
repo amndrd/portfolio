@@ -2,7 +2,7 @@
 
 A portfolio site styled as an old CRT terminal: worn white-on-black interface, phosphor grain, and a frame-timed animation for every step. Projects sit in a 3 × 5 grid of pictograms. Pick one and a crosshair flies to it, the cell flips and moves to the top-left, and a project panel builds itself around a live ASCII view of the project. LAUNCH plays a boot log before the detail page.
 
-Everything is drawn on a single canvas and filtered through a WebGL CRT pass. Every step has its sound: library effects cut, transformed and mixed for the site, timed on the animation frames (see [docs/sound-design.md](docs/sound-design.md)).
+Everything is drawn on a single canvas and filtered through a WebGL CRT pass. Every step has its sound: library effects cut, transformed and mixed for the site, timed on the animation frames (see [docs/sound-design.md](docs/sound-design.md) and the selection notes in [docs/sound-selection.md](docs/sound-selection.md)).
 
 ![Grid](docs/screenshots/grid.png)
 ![Project panel](docs/screenshots/panel.png)
