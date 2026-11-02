@@ -16,7 +16,7 @@ cd site
 python3 -m http.server 8080
 ```
 
-Then open <http://localhost:8080>.
+Then open <http://localhost:8080>. Any static file server works the same way.
 
 ### Sounds
 
