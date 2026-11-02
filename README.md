@@ -81,6 +81,7 @@ node site-test.mjs                    # end-to-end run of the whole flow (site s
 node capture.mjs <page> <out> name=query ...   # screenshots of a prototype
 node sequence.mjs <page> <out> <query> <from> <to>   # frame-by-frame export
 node record-audio.mjs                 # records the site's audio over a scripted run
+node sound-button-test.mjs            # screenshots of the sound button states
 node sound-test.mjs                   # sounds load and play, hover never stacks, mute, silent without files
 node sound/check.mjs <reference>      # the scripted run against a reference clip: spectrograms, level per moment
 ```
