@@ -2,6 +2,7 @@
 // warm white palette in normal or inverted mode. The UI is drawn white on black
 // into a 2D canvas and uploaded with upload(); render(t) draws one frame at time t (seconds).
 
+// Palette slots, darkest to brightest: background, grain, dim UI, UI, highlight.
 const CRT_PALETTE = ['#030302', '#121210', '#4d4c47', '#ecebe3', '#ffffff'];
 const CRT_PALETTE_INV = ['#eeece4', '#e1dfd6', '#a19f96', '#1a1916', '#050504'];
 
